@@ -447,6 +447,55 @@ class StreamlitStreamingCallbackHandler(BaseCallbackHandler):
             self.container.markdown(final_content)
 
 
+def coerce_content_to_text(content: Any) -> str:
+    """
+    Convert model message content into displayable text.
+
+    Handles Anthropic-style content blocks (list of {type, text, ...}) and
+    LangChain message chunk types by extracting only textual parts.
+    """
+    # Direct string
+    if isinstance(content, str):
+        return content
+
+    # List of content blocks (Anthropic style)
+    if isinstance(content, list):
+        aggregated: List[str] = []
+        for block in content:
+            # Plain string blocks
+            if isinstance(block, str):
+                aggregated.append(block)
+                continue
+            # Dict-based block: {"type": "text", "text": "..."}
+            if isinstance(block, dict):
+                block_type = block.get("type")
+                if block_type == "text" and isinstance(block.get("text"), str):
+                    aggregated.append(block["text"])
+                # Ignore non-text blocks for display
+                continue
+
+            # Object with attributes (SDK block types)
+            if hasattr(block, "type") and getattr(block, "type") == "text" and hasattr(block, "text"):
+                text_val = getattr(block, "text")
+                if isinstance(text_val, str):
+                    aggregated.append(text_val)
+                continue
+
+            # Nested lists/tuples
+            if isinstance(block, (list, tuple)):
+                nested_text = coerce_content_to_text(block)
+                if nested_text:
+                    aggregated.append(nested_text)
+
+        return "".join(aggregated)
+
+    # Message chunk objects: try to access .content recursively
+    if hasattr(content, "content"):
+        return coerce_content_to_text(getattr(content, "content"))
+
+    # Fallback to string conversion
+    return str(content) if content is not None else ""
+
 async def run_async_generator(async_gen):
     """
     Run an async generator and collect all results.

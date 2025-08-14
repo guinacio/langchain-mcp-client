@@ -20,7 +20,7 @@ from .agent_manager import (
     stream_agent_response, stream_agent_events
 )
 from .memory_tools import calculate_chat_statistics, format_chat_history_for_export
-from .utils import run_async, create_download_data, safe_async_call, format_error_message, run_streaming_async
+from .utils import run_async, create_download_data, safe_async_call, format_error_message, run_streaming_async, coerce_content_to_text
 from .database import PersistentStorageManager
 from .llm_providers import (
     get_available_providers, supports_system_prompt, get_default_temperature,
@@ -510,8 +510,11 @@ def process_streaming_response(user_input: str):
                             # Handle streaming tokens from the chat model
                             chunk = event.get("data", {}).get("chunk", {})
                             if hasattr(chunk, 'content') and chunk.content:
+                                chunk_text = coerce_content_to_text(chunk.content)
+                                if not chunk_text:
+                                    continue
                                 # Add to text buffer for reasoning detection
-                                text_buffer += chunk.content
+                                text_buffer += chunk_text
                                 
                                 # Check for reasoning content
                                 reasoning_info = detect_reasoning_in_stream(text_buffer, thinking_round)
@@ -567,7 +570,7 @@ def process_streaming_response(user_input: str):
                                             response_placeholder.write(current_response)
                                 else:
                                     # No reasoning detected, accumulate and stream normal response
-                                    current_response += chunk.content
+                                    current_response += chunk_text
                                     
                                     # Start streaming response inside status container
                                     if not response_started:
@@ -594,7 +597,8 @@ def process_streaming_response(user_input: str):
                                     full_content = str(final_response_event)
                                 
                                 # Parse the full content for reasoning
-                                parsed_content = parse_reasoning_content(full_content)
+                                full_text = coerce_content_to_text(full_content)
+                                parsed_content = parse_reasoning_content(full_text)
                                 
                                 if parsed_content['thinking']:
                                     thinking_content = parsed_content['thinking']
@@ -612,7 +616,7 @@ def process_streaming_response(user_input: str):
                                         
                                         reasoning_complete = True
                                 else:
-                                    current_response = full_content
+                                    current_response = full_text
                     
                     # Update main status when processing is complete
                     if current_response:

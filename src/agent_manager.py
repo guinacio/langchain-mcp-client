@@ -319,6 +319,7 @@ def extract_assistant_response(response: Dict) -> str:
         Assistant's text response
     """
     from langchain_core.messages import HumanMessage, AIMessage
+    from .utils import coerce_content_to_text
     
     if "messages" not in response:
         return ""
@@ -328,7 +329,7 @@ def extract_assistant_response(response: Dict) -> str:
     ai_messages = []
     for msg in response["messages"]:
         if isinstance(msg, AIMessage) and hasattr(msg, "content") and msg.content:
-            content = str(msg.content).strip()
+            content = coerce_content_to_text(msg.content).strip()
             # Skip tool call artifacts and empty content
             if (content and 
                 content != "<|tool_call|>[]" and 
