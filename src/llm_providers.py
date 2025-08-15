@@ -213,16 +213,18 @@ def create_llm_model(
     else:
         common_params["temperature"] = temperature
     
-    # Add streaming if supported
+    # Add streaming if supported (handle Google models separately due to different parameter name)
     if streaming and supports_streaming(llm_provider):
         # For reasoning models, check if the specific model supports streaming
         if is_reasoning_model:
             # o1 series doesn't support streaming; o3/o4 do
             if supports_streaming_for_reasoning_model(model_name):
-                common_params["streaming"] = True
+                if llm_provider != "Google":  # Google uses disable_streaming instead
+                    common_params["streaming"] = True
         else:
-            # Regular models - use streaming as normal
-            common_params["streaming"] = True
+            # Regular models - use streaming as normal (except Google)
+            if llm_provider != "Google":  # Google uses disable_streaming instead
+                common_params["streaming"] = True
     
     # Handle max_tokens vs max_completion_tokens
     if max_tokens:
@@ -258,6 +260,12 @@ def create_llm_model(
         if system_prompt:
             # Gemini converts system messages to human messages
             google_params["convert_system_message_to_human"] = True
+        
+        # Handle streaming for Google (uses disable_streaming instead of streaming)
+        if streaming and supports_streaming(llm_provider):
+            google_params["disable_streaming"] = False  # False means streaming is enabled
+        else:
+            google_params["disable_streaming"] = True   # True means streaming is disabled
         
         llm = ChatGoogleGenerativeAI(
             google_api_key=api_key,
