@@ -205,14 +205,19 @@ def create_llm_model(
         "model": model_name,
     }
     
-    # Handle temperature parameter (reasoning models don't support it)
-    if not is_reasoning_model:
+    # Handle temperature parameter
+    # OpenAI reasoning models (o1/o3/o4 series) do NOT support temperature.
+    # Explicitly set to None to override library defaults and avoid sending it.
+    if is_reasoning_model:
+        common_params["temperature"] = 1.0
+    else:
         common_params["temperature"] = temperature
     
-    # Add streaming if supported 
+    # Add streaming if supported
     if streaming and supports_streaming(llm_provider):
         # For reasoning models, check if the specific model supports streaming
         if is_reasoning_model:
+            # o1 series doesn't support streaming; o3/o4 do
             if supports_streaming_for_reasoning_model(model_name):
                 common_params["streaming"] = True
         else:
@@ -232,9 +237,8 @@ def create_llm_model(
     if timeout:
         common_params["timeout"] = timeout
     
-    # Add reasoning effort for reasoning models
-    if is_reasoning_model:
-        # Default to medium reasoning effort for reasoning models
+    # Add reasoning-effort style parameter for OpenAI reasoning models only
+    if is_reasoning_model and llm_provider == "OpenAI":
         common_params["reasoning_effort"] = "medium"
     
     # Create the base model

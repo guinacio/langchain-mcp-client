@@ -13,15 +13,23 @@ import streamlit as st
 from langchain_core.callbacks import BaseCallbackHandler
 
 
-def run_async(coro):
+def run_async(coro_or_factory):
     """
     Run an async function with improved context management and timeout protection.
-    
-    This function handles different scenarios:
-    1. When there's no event loop running (first call)
-    2. When there's already an event loop running (nested calls)
-    3. When running in different thread contexts
+
+    Accepts either:
+    - a coroutine object, or
+    - a zero-argument callable that returns a fresh coroutine each time it's called
+
+    Using a factory avoids "cannot reuse already awaited coroutine" on retries.
     """
+    import inspect
+
+    is_factory = callable(coro_or_factory) and not inspect.iscoroutine(coro_or_factory)
+
+    def build_coro():
+        return coro_or_factory() if is_factory else coro_or_factory
+
     try:
         # Check if we're already in an async context
         try:
@@ -32,28 +40,28 @@ def run_async(coro):
         if loop is None:
             # No event loop running - create one and run the coroutine
             # Add a timeout to prevent infinite hanging
-            future = asyncio.wait_for(coro, timeout=600.0)  # 10 minute max timeout
+            future = asyncio.wait_for(build_coro(), timeout=600.0)  # 10 minute max timeout
             return asyncio.run(future)
         else:
             # We're in an async context, but need to handle it carefully
-            # Check if we have a stored event loop
-            if hasattr(st.session_state, 'loop') and st.session_state.loop:
-                # We're in an async context - use asyncio.run with timeout
-                return _run_with_timeout_and_new_loop(coro, timeout=600.0)
-            else:
-                # Create new event loop in thread
-                return _run_with_timeout_and_new_loop(coro, timeout=600.0)
+            # Always run in a fresh loop to avoid conflicts
+            return _run_with_timeout_and_new_loop(build_coro(), timeout=600.0)
                 
     except (RuntimeError, asyncio.TimeoutError) as e:
         # Handle specific timeout and context errors
         if "TimeoutError" in str(type(e).__name__) or "timeout" in str(e).lower():
             raise TimeoutError("Operation timed out after 10 minutes") from e
         else:
-            # Context conflict - use alternative approach
-            return _run_with_timeout_and_new_loop(coro, timeout=600.0)
-    except Exception as e:
-        # Fallback: always use new thread
-        return _run_with_timeout_and_new_loop(coro, timeout=600.0)
+            # Context conflict - try alternative approach with a fresh coroutine if possible
+            if is_factory:
+                return _run_with_timeout_and_new_loop(build_coro(), timeout=600.0)
+            raise
+    except Exception:
+        # Fallback: use new thread/loop with a fresh coroutine if possible
+        if is_factory:
+            return _run_with_timeout_and_new_loop(build_coro(), timeout=600.0)
+        # If not a factory, avoid reusing the same awaited coroutine
+        raise
 
 
 def _run_with_timeout_and_new_loop(coro, timeout: float = 600.0):
@@ -248,7 +256,7 @@ def format_error_message(error: Exception) -> str:
         return error_msg
 
 
-def safe_async_call(coro, error_message: str = "Async operation failed", timeout: float = 600.0):
+def safe_async_call(coro_or_factory, error_message: str = "Async operation failed", timeout: float = 600.0):
     """
     Safely call an async function with improved error handling and timeout.
     
@@ -261,9 +269,17 @@ def safe_async_call(coro, error_message: str = "Async operation failed", timeout
         Result of the coroutine or None if failed
     """
     try:
-        # Add timeout wrapper to the coroutine
-        timeout_coro = asyncio.wait_for(coro, timeout=timeout)
-        return run_async(timeout_coro)
+        import inspect
+        # Always pass a factory to run_async so a fresh coroutine is created on retries
+        def factory():
+            if inspect.iscoroutine(coro_or_factory):
+                return asyncio.wait_for(coro_or_factory, timeout=timeout)
+            elif callable(coro_or_factory):
+                return asyncio.wait_for(coro_or_factory(), timeout=timeout)
+            else:
+                # Assume it's an awaitable-like object
+                return asyncio.wait_for(coro_or_factory, timeout=timeout)
+        return run_async(factory)
     except asyncio.TimeoutError:
         st.error(f"{error_message}: Operation timed out after {timeout} seconds")
         st.info("💡 The server may be overloaded or unreachable. Try again or check the server status.")
