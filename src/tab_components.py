@@ -22,8 +22,8 @@ from .agent_manager import (
 from .memory_tools import calculate_chat_statistics, format_chat_history_for_export
 from .utils import (
     run_async, create_download_data, safe_async_call, format_error_message,
-    run_streaming_async, coerce_content_to_text, build_multimodal_human_content,
-    is_vision_model
+    coerce_content_to_text, build_multimodal_human_content,
+    get_system_info
 )
 from .database import PersistentStorageManager
 from .llm_providers import (
@@ -1019,6 +1019,15 @@ def handle_chat_error(error: Exception):
 def render_test_tools_tab():
     """Render the tool testing interface tab."""
     st.header("🔧 Test Tools Individually")
+    # Toolbar with quick tips and counts
+    cols = st.columns([2, 1])
+    with cols[0]:
+        with st.popover("Tips & Shortcuts"):
+            st.markdown("- Use the search to quickly find tools\n- Import parameters from JSON\n- Save and reuse presets for repeated tests\n- Preview result in multiple formats")
+    with cols[1]:
+        total = len(st.session_state.get('tools', []))
+        st.caption(f"Tools available: {total}")
+    st.divider()
     
     if not st.session_state.tools:
         st.warning("⚠️ No tools available. Please connect to an MCP server first.")
@@ -1029,25 +1038,54 @@ def render_test_tools_tab():
     selected_tool = render_tool_selection()
     if not selected_tool:
         return
-    
-    # Tool parameters and execution
-    tool_params, missing_required = render_tool_parameters_form(selected_tool)
-    
-    # Tool execution controls
-    render_tool_execution_controls(selected_tool, tool_params, missing_required)
+
+    # Side-by-side: parameters (left) and execution (right)
+    st.divider()
+    col_params, col_exec = st.columns([2, 1])
+    with col_params:
+        tool_params, missing_required = render_tool_parameters_form(selected_tool)
+    with col_exec:
+        render_tool_execution_controls(selected_tool, tool_params, missing_required)
     
     # Test results display
+    st.divider()
     render_test_results(selected_tool.name)
     
     # Testing summary
+    st.divider()
     render_testing_summary()
 
 
 def render_tool_selection():
     """Render tool selection interface."""
     st.subheader("Select Tool to Test")
-    
-    tool_names = [tool.name for tool in st.session_state.tools]
+    # Search and filters
+    fcols = st.columns([2, 1])
+    with fcols[0]:
+        query = st.text_input("Search tools", value=st.session_state.get("test_tool_search", ""), key="test_tool_search", placeholder="Type to filter by name...")
+    with fcols[1]:
+        only_with_params = st.toggle("Has parameters", value=st.session_state.get("test_only_with_params", False), key="test_only_with_params")
+
+    # Build filtered list
+    all_tools = st.session_state.tools
+    filtered = []
+    q = (query or "").strip().lower()
+    for t in all_tools:
+        if only_with_params:
+            has_params = False
+            if hasattr(t, 'args_schema') and t.args_schema:
+                schema = t.args_schema
+                if hasattr(schema, 'schema'):
+                    props = schema.schema().get('properties', {})
+                else:
+                    props = schema.get('properties', {})
+                has_params = bool(props)
+            if not has_params:
+                continue
+        if not q or q in t.name.lower():
+            filtered.append(t)
+
+    tool_names = [tool.name for tool in filtered]
     selected_tool_name = st.selectbox(
         "Choose a tool:",
         options=tool_names,
@@ -1074,6 +1112,17 @@ def render_selected_tool_info(selected_tool, selected_tool_name):
     with col1:
         st.write(f"**Name:** {selected_tool.name}")
         st.write(f"**Description:** {selected_tool.description}")
+        # Schema popover
+        with st.popover("View schema"):
+            try:
+                if hasattr(selected_tool, 'args_schema') and selected_tool.args_schema:
+                    schema = selected_tool.args_schema
+                    schema_dict = schema.schema() if hasattr(schema, 'schema') else schema
+                    st.json(schema_dict)
+                else:
+                    st.info("This tool has no parameters.")
+            except Exception as _e:
+                st.info("Schema not available.")
     
     with col2:
         # Tool execution statistics
@@ -1083,6 +1132,8 @@ def render_selected_tool_info(selected_tool, selected_tool_name):
             st.metric("Tests Run", stats.get('count', 0))
             st.metric("Success Rate", f"{stats.get('success_rate', 0):.1f}%")
             st.metric("Avg Time", f"{stats.get('avg_time', 0):.2f}s")
+        else:
+            st.caption("No runs yet")
 
 
 def render_tool_parameters_form(tool):
@@ -1104,6 +1155,21 @@ def render_tool_parameters_form(tool):
         
         if properties:
             st.write("Fill in the parameters below:")
+            # Quick actions
+            with st.popover("Import from JSON"):
+                json_text = st.text_area("Paste JSON for parameters", height=150, key="param_import_json")
+                if st.button("Apply JSON", key="apply_import_json"):
+                    try:
+                        parsed = json.loads(json_text or "{}")
+                        if isinstance(parsed, dict):
+                            for pname in properties.keys():
+                                if pname in parsed:
+                                    st.session_state[f"test_param_{pname}"] = parsed[pname]
+                            st.success("Parameters applied")
+                        else:
+                            st.warning("Expected a JSON object")
+                    except Exception as e:
+                        st.error(f"Invalid JSON: {e}")
             tool_params = render_parameter_inputs(properties, required_params)
         else:
             st.info("This tool doesn't require any parameters.")
@@ -1188,7 +1254,7 @@ def render_tool_execution_controls(tool, tool_params, missing_required):
     """Render tool execution controls."""
     st.subheader("Execute Tool")
     
-    col1, col2, col3 = st.columns([1, 1, 2])
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
     
     with col1:
         if st.button("🚀 Run Tool", type="primary", disabled=len(missing_required) > 0):
@@ -1202,6 +1268,38 @@ def render_tool_execution_controls(tool, tool_params, missing_required):
         if st.button("📋 Copy Parameters as JSON"):
             params_json = json.dumps(tool_params, indent=2)
             st.code(params_json, language="json")
+
+    with col4:
+        with st.popover("Presets"):
+            # Initialize presets store
+            if 'tool_param_presets' not in st.session_state:
+                st.session_state.tool_param_presets = {}
+            presets = st.session_state.tool_param_presets.get(tool.name, [])
+            names = [p['name'] for p in presets]
+            selected = st.selectbox("Select preset", options=["(none)"] + names, key=f"preset_select_{tool.name}")
+            c1, c2 = st.columns(2)
+            with c1:
+                new_name = st.text_input("Name", key=f"preset_name_{tool.name}")
+            with c2:
+                if st.button("Save current", key=f"preset_save_{tool.name}"):
+                    if new_name:
+                        presets = st.session_state.tool_param_presets.get(tool.name, [])
+                        presets = [p for p in presets if p['name'] != new_name]
+                        presets.append({'name': new_name, 'params': tool_params.copy()})
+                        st.session_state.tool_param_presets[tool.name] = presets
+                        st.success("Preset saved")
+                    else:
+                        st.warning("Enter a name")
+            if selected and selected != "(none)":
+                if st.button("Apply preset", key=f"preset_apply_{tool.name}"):
+                    preset = next((p for p in presets if p['name'] == selected), None)
+                    if preset:
+                        for pname, pval in preset['params'].items():
+                            st.session_state[f"test_param_{pname}"] = pval
+                        st.success("Applied preset. Adjust above if needed.")
+                if st.button("Delete preset", key=f"preset_delete_{tool.name}"):
+                    st.session_state.tool_param_presets[tool.name] = [p for p in presets if p['name'] != selected]
+                    st.success("Deleted preset")
 
 
 def execute_tool_test(tool, tool_params):
@@ -1305,31 +1403,36 @@ def render_latest_result(result):
     """Render the latest test result."""
     if result['success']:
         st.success("✅ Latest Result")
-        with st.expander("View Result Details", expanded=True):
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                st.write("**Output:**")
-                if isinstance(result['result'], str):
-                    st.text(result['result'])
-                else:
-                    st.json(result['result'])
-            with col2:
-                st.write("**Execution Info:**")
-                st.write(f"Time: {result['execution_time']:.2f}s")
-                st.write(f"Timestamp: {result['timestamp']}")
-                
-                if result['parameters']:
-                    st.write("**Parameters:**")
-                    st.json(result['parameters'])
+        tabs = st.tabs(["Pretty", "JSON", "Raw", "Meta"])
+        with tabs[0]:
+            if isinstance(result['result'], (dict, list)):
+                st.json(result['result'])
+            else:
+                st.write(str(result['result']))
+        with tabs[1]:
+            try:
+                st.code(json.dumps(result['result'], indent=2), language="json")
+            except Exception:
+                st.code(str(result['result']), language="text")
+        with tabs[2]:
+            st.code(str(result['result']), language="text")
+        with tabs[3]:
+            st.write(f"Time: {result['execution_time']:.2f}s")
+            st.write(f"Timestamp: {result['timestamp']}")
+            if result['parameters']:
+                st.write("Parameters:")
+                st.json(result['parameters'])
     else:
         st.error("❌ Latest Result")
-        with st.expander("View Error Details", expanded=True):
-            st.write("**Error:**")
-            st.code(result['error'])
-            st.write(f"**Execution Time:** {result['execution_time']:.2f}s")
+        tabs = st.tabs(["Error", "Params", "Meta"])
+        with tabs[0]:
+            st.code(result.get('error', ''), language="text")
+        with tabs[1]:
             if result['parameters']:
-                st.write("**Parameters:**")
                 st.json(result['parameters'])
+        with tabs[2]:
+            st.write(f"Time: {result['execution_time']:.2f}s")
+            st.write(f"Timestamp: {result['timestamp']}")
 
 
 def render_result_history(history_results):
@@ -1338,21 +1441,31 @@ def render_result_history(history_results):
         return
     
     with st.expander(f"Previous Results ({len(history_results)})"):
+        fcols = st.columns([1, 2])
+        with fcols[0]:
+            status_filter = st.radio("Filter", options=["All", "Success", "Failed"], horizontal=True, key="history_status_filter")
+        with fcols[1]:
+            search_q = st.text_input("Search in results", key="history_search", placeholder="Filter by text...")
         for i, result in enumerate(history_results, 1):
+            if status_filter == "Success" and not result['success']:
+                continue
+            if status_filter == "Failed" and result['success']:
+                continue
+            if search_q:
+                text_blob = json.dumps(result.get('result')) if not isinstance(result.get('result'), str) else result.get('result')
+                if search_q.lower() not in str(text_blob).lower():
+                    continue
             status = "✅" if result['success'] else "❌"
             time_str = datetime.datetime.fromisoformat(result['timestamp']).strftime("%H:%M:%S")
-            
             st.write(f"**{status} Test #{i + 1}** - {time_str} ({result['execution_time']:.2f}s)")
-            
             if result['success']:
-                if isinstance(result['result'], str):
+                if isinstance(result['result'], (dict, list)):
+                    st.json(result['result'])
+                else:
                     display_text = result['result'][:200] + "..." if len(str(result['result'])) > 200 else result['result']
                     st.text(display_text)
-                else:
-                    st.json(result['result'])
             else:
-                st.error(f"Error: {result['error']}")
-            
+                st.error(f"Error: {result.get('error', '')}")
             st.divider()
 
 
@@ -1950,26 +2063,87 @@ def render_memory_tips():
 
 def render_about_tab():
     """Render the about tab."""
-    st.image("logo_transparent.png", width=200)
-    st.markdown("""
-    ### About
-    This application demonstrates a Streamlit interface for LangChain MCP (Model Context Protocol) adapters. 
-    It allows you to connect to MCP servers and use their tools with different LLM providers.
+    # Header with logo and quick facts
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        st.image("logo_transparent.png", width=160)
+    with c2:
+        st.subheader("LangChain MCP Client")
+        # Version and environment
+        app_version = "dev"
+        try:
+            from importlib.metadata import version as _pkg_version
+            try:
+                app_version = _pkg_version("langchain-mcp-client")
+            except Exception:
+                # Fallback to pyproject parsing
+                import tomllib
+                with open("pyproject.toml", "rb") as _f:
+                    data = tomllib.load(_f)
+                    app_version = data.get("project", {}).get("version", app_version)
+        except Exception:
+            pass
+        st.caption(f"Version: {app_version}")
+        # Quick badges
+        providers = get_available_providers()
+        with st.container(horizontal=True):
+            for p in providers:
+                st.badge(f"{p}", color="green")
 
-    For more information, check out:
-    - [LangChain MCP Adapters](https://github.com/langchain-ai/langchain-mcp-adapters)
-    - [Model Context Protocol](https://modelcontextprotocol.io/introduction)
-                
-    ### License
-    This project is licensed under the MIT License.
-    
-    ### Acknowledgements
-    - This application is built using [Streamlit](https://streamlit.io/) for the frontend.
-    
-    ### Developer
-    - [LinkedIn](https://www.linkedin.com/in/guinacio/)
-    - [Github](https://github.com/guinacio)
-    """)
+        st.markdown("**Developer**")
+        with st.container(horizontal=True):
+            st.link_button("LinkedIn", "https://www.linkedin.com/in/guinacio/")
+            st.link_button("GitHub", "https://github.com/guinacio")
+
+    # Tabs for structured info
+    t_overview, t_getting_started, t_links, t_system, t_license = st.tabs([
+        "Overview", "Getting Started", "Links", "System", "License"
+    ])
+
+    with t_overview:
+        st.markdown("""
+        **What is this?**
+        - A Streamlit app to interact with MCP servers via LangChain tools and agents.
+        - Supports multiple LLM providers and streaming.
+        - Memory support with session or persistent storage.
+        """)
+        with st.popover("What's new"):
+            st.markdown("- Chat attachments (PDF/TXT/images)\n- Improved Test Tools UI with search, presets, and tabs\n- Streaming with reasoning visualization")
+
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            st.metric("Providers", len(providers))
+        with f2:
+            st.metric("Tools Connected", len(st.session_state.get("tools", [])))
+        with f3:
+            st.metric("Sessions", len(st.session_state.get("chat_history", [])))
+
+    with t_getting_started:
+        st.markdown("""
+        1. Configure your LLM provider and model in the sidebar.
+        2. Connect to one or more MCP servers (or use Chat-only mode).
+        3. Chat in the Chat tab or test individual tools in Test Tools.
+        4. Optionally enable Memory and set a Thread ID to persist conversations.
+        """)
+        st.info("Tip: Use the Test Tools tab to dry-run tools and save parameter presets.")
+
+    with t_links:
+        st.markdown("""
+        - [LangChain Documentation](https://python.langchain.com/docs/)
+        - [LangGraph Documentation](https://langchain-ai.github.io/langgraph/)
+        - [MCP (Model Context Protocol)](https://modelcontextprotocol.io/introduction)
+        - [LangChain MCP Adapters](https://github.com/langchain-ai/langchain-mcp-adapters)
+        """)
+
+    with t_system:
+        info = get_system_info()
+        st.json(info)
+        st.caption("Environment info is captured at runtime for troubleshooting.")
+
+    with t_license:
+        st.markdown("""
+        This project is licensed under the **MIT License**. See the `LICENSE` file for details.
+        """)
 
 
 def display_tool_executions():
