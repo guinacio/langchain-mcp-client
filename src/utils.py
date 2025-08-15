@@ -11,6 +11,8 @@ import datetime
 from typing import Any, Dict, List
 import streamlit as st
 from langchain_core.callbacks import BaseCallbackHandler
+import base64
+from io import BytesIO
 
 
 def run_async(coro_or_factory):
@@ -129,6 +131,10 @@ def initialize_session_state():
     
     if 'servers' not in st.session_state:
         st.session_state.servers = {}
+    
+    # Initialize chat attachments buffer
+    if 'chat_attachments' not in st.session_state:
+        st.session_state.chat_attachments = []
     
     # Initialize streaming setting
     if 'enable_streaming' not in st.session_state:
@@ -440,6 +446,122 @@ def model_supports_tools(model_name: str) -> bool:
             return False
     
     return True
+
+
+def is_vision_model(provider: str, model_name: str) -> bool:
+    """
+    Best-effort check for models that can accept image inputs.
+    """
+    provider_lower = (provider or "").lower()
+    model_lower = (model_name or "").lower()
+    if provider_lower == "openai":
+        return any(tag in model_lower for tag in ["gpt-4o", "o4", "gpt-4.1", "gpt-4-turbo"]) or "vision" in model_lower
+    if provider_lower == "anthropic":
+        return "claude-3" in model_lower or "sonnet" in model_lower or "opus" in model_lower or "haiku" in model_lower
+    if provider_lower == "google":
+        return "gemini" in model_lower
+    if provider_lower == "ollama":
+        # ChatOllama in LangChain typically expects text-only; avoid image blocks
+        return False
+    return False
+
+
+def pdf_bytes_to_text(data: bytes) -> str:
+    """Extract text from PDF bytes using pypdf."""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(BytesIO(data))
+        texts: List[str] = []
+        for page in reader.pages:
+            try:
+                txt = page.extract_text() or ""
+            except Exception:
+                txt = ""
+            if txt:
+                texts.append(txt)
+        return "\n\n".join(texts).strip()
+    except Exception:
+        # Fallback if parsing fails
+        return ""
+
+
+def infer_mime_type(filename: str) -> str:
+    """Infer MIME type from filename extension for chat attachments."""
+    import os
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext in [".png"]:
+        return "image/png"
+    if ext in [".jpg", ".jpeg"]:
+        return "image/jpeg"
+    if ext in [".gif"]:
+        return "image/gif"
+    if ext in [".webp"]:
+        return "image/webp"
+    if ext in [".pdf"]:
+        return "application/pdf"
+    if ext in [".txt", ".md", ".log"]:
+        return "text/plain"
+    return "application/octet-stream"
+
+
+def build_multimodal_human_content(
+    provider: str,
+    model_name: str,
+    text: str,
+    attachments: List[Dict],
+) -> Any:
+    """
+    Build a HumanMessage content payload that includes text plus optional image/text attachments.
+
+    attachments: list of dicts with keys: {name, data (bytes), type ("image"|"pdf"|"text")}
+    """
+    # Normalize provider for branch logic
+    provider_lower = (provider or "").lower()
+
+    # Convert attachments to model-consumable parts
+    image_blocks = []
+    text_blocks = []
+
+    for att in attachments or []:
+        name = att.get("name") or "attachment"
+        raw = att.get("data") or b""
+        kind = att.get("type") or ""
+
+        if kind == "image":
+            mime = infer_mime_type(name)
+            b64 = base64.b64encode(raw).decode("utf-8")
+            if provider_lower == "anthropic":
+                image_blocks.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": mime, "data": b64}
+                })
+            else:
+                # Use data URL for OpenAI/Gemini wrappers
+                data_url = f"data:{mime};base64,{b64}"
+                image_blocks.append({"type": "image_url", "image_url": {"url": data_url}})
+        elif kind == "pdf":
+            extracted = pdf_bytes_to_text(raw)
+            if extracted:
+                text_blocks.append({"type": "text", "text": f"[PDF: {name}]\n\n" + extracted})
+        elif kind == "text":
+            try:
+                decoded = raw.decode("utf-8", errors="replace")
+            except Exception:
+                decoded = str(raw)
+            text_blocks.append({"type": "text", "text": f"[File: {name}]\n\n" + decoded})
+
+    # For providers that accept list-of-blocks (Anthropic-style), return blocks
+    # Base text must be first
+    base_text_block = {"type": "text", "text": text}
+
+    # If provider supports images, include them; else, drop images
+    if is_vision_model(provider, model_name):
+        blocks = [base_text_block] + image_blocks + text_blocks
+    else:
+        blocks = [base_text_block] + text_blocks
+
+    # Some LangChain wrappers also accept plain string; we return blocks to maximize compatibility
+    return blocks
 
 
 class StreamlitStreamingCallbackHandler(BaseCallbackHandler):

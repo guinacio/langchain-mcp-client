@@ -17,14 +17,14 @@ from .database import PersistentStorageManager
 from .utils import model_supports_tools
 
 
-async def run_agent(agent, message: str) -> Dict:
-    """Run the agent with the provided message."""
-    return await agent.ainvoke({"messages": [HumanMessage(message)]})
+async def run_agent(agent, message_content) -> Dict:
+    """Run the agent with the provided (possibly multimodal) message content."""
+    return await agent.ainvoke({"messages": [HumanMessage(content=message_content)]})
 
 
-async def stream_agent_response(agent, message: str, config: Dict = None):
+async def stream_agent_response(agent, message_content, config: Dict = None):
     """Stream agent response with real-time updates."""
-    messages = [HumanMessage(message)]
+    messages = [HumanMessage(content=message_content)]
     
     if config:
         async for event in agent.astream({"messages": messages}, config):
@@ -34,9 +34,9 @@ async def stream_agent_response(agent, message: str, config: Dict = None):
             yield event
 
 
-async def stream_agent_events(agent, message: str, config: Dict = None):
+async def stream_agent_events(agent, message_content, config: Dict = None):
     """Stream agent events for more detailed streaming control."""
-    messages = [HumanMessage(message)]
+    messages = [HumanMessage(content=message_content)]
     
     if config:
         async for event in agent.astream_events({"messages": messages}, config, version="v2"):

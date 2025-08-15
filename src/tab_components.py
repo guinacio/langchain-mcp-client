@@ -20,7 +20,11 @@ from .agent_manager import (
     stream_agent_response, stream_agent_events
 )
 from .memory_tools import calculate_chat_statistics, format_chat_history_for_export
-from .utils import run_async, create_download_data, safe_async_call, format_error_message, run_streaming_async, coerce_content_to_text
+from .utils import (
+    run_async, create_download_data, safe_async_call, format_error_message,
+    run_streaming_async, coerce_content_to_text, build_multimodal_human_content,
+    is_vision_model
+)
 from .database import PersistentStorageManager
 from .llm_providers import (
     get_available_providers, supports_system_prompt, get_default_temperature,
@@ -280,6 +284,12 @@ def render_chat_history():
         if message["role"] == "user":
             with st.chat_message("user", avatar="👤"):
                 st.write(message["content"])
+                # Show attachments if any
+                attachments_meta = message.get("attachments", [])
+                if attachments_meta:
+                    with st.expander(f"📎 Attachments ({len(attachments_meta)})", expanded=False):
+                        for meta in attachments_meta:
+                            st.caption(f"{meta.get('name', 'file')} - {meta.get('type', '')}")
                 
                 # Show timestamp if available
                 if "timestamp" in message:
@@ -371,29 +381,75 @@ def get_tools_for_message_index(message_index: int) -> List[Dict]:
 
 def handle_chat_input():
     """Handle chat input and agent processing."""
-    if user_input := st.chat_input("Type your message here..."):
+    submission = st.chat_input(
+        "Type your message here...",
+        accept_file="multiple",
+        file_type=["pdf", "txt", "md", "png", "jpg", "jpeg", "gif", "webp"]
+    )
+    if submission:
+        # Parse submission (string or dict-like with text/files)
+        if isinstance(submission, str):
+            text = submission
+            files = []
+        else:
+            # Support attribute and key access
+            text = getattr(submission, "text", None)
+            if text is None:
+                try:
+                    text = submission.get("text", "")  # type: ignore[attr-defined]
+                except Exception:
+                    text = ""
+            files = getattr(submission, "files", None)
+            if files is None:
+                try:
+                    files = submission.get("files", [])  # type: ignore[attr-defined]
+                except Exception:
+                    files = []
+        # Build attachments from uploaded files
+        attachments = []
+        for uf in files or []:
+            try:
+                data = uf.getvalue() if hasattr(uf, "getvalue") else uf.read()
+            except Exception:
+                data = b""
+            name = getattr(uf, "name", "file") or "file"
+            lower = name.lower()
+            if any(lower.endswith(e) for e in [".png", ".jpg", ".jpeg", ".gif", ".webp"]):
+                kind = "image"
+            elif lower.endswith(".pdf"):
+                kind = "pdf"
+            else:
+                kind = "text"
+            attachments.append({"name": name, "data": data, "type": kind})
+
+        # Build multimodal content
+        provider = st.session_state.get('llm_provider', '')
+        model = st.session_state.get('selected_model', '')
+        message_content = build_multimodal_human_content(provider, model, text or "", attachments)
+
         # Add user message to chat history with metadata
         current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         message_count = len(st.session_state.chat_history) + 1
         message_id = f"msg_{message_count:04d}"
-        
+
         user_message = {
-            "role": "user", 
-            "content": user_input,
+            "role": "user",
+            "content": text or "",
             "timestamp": current_time,
-            "message_id": message_id
+            "message_id": message_id,
+            "attachments": [{"name": a.get("name"), "type": a.get("type")} for a in attachments] if attachments else []
         }
         st.session_state.chat_history.append(user_message)
-        st.chat_message("user").write(user_input)
-        
+        st.chat_message("user").write(text or "")
+
         # Check if agent is set up
         if st.session_state.agent is None:
             st.error("Please initialize an agent first (either connect to an MCP server or start chat-only mode)")
         else:
-            process_user_message(user_input)
+            process_user_message(text or "", message_content)
 
 
-def process_user_message(user_input: str):
+def process_user_message(user_input: str, message_content: Any):
     """Process user message through the agent with streaming support."""
     with st.chat_message("assistant"):
         # Check if streaming is enabled in session state
@@ -401,13 +457,13 @@ def process_user_message(user_input: str):
         
         if streaming_enabled:
             # Use streaming approach
-            process_streaming_response(user_input)
+            process_streaming_response(user_input, message_content)
         else:
             # Use original non-streaming approach
-            process_non_streaming_response(user_input)
+            process_non_streaming_response(user_input, message_content)
 
 
-def process_streaming_response(user_input: str):
+def process_streaming_response(user_input: str, message_content: Any):
     """Process user message with enhanced streaming using st.status and st.write_stream with reasoning detection."""
     # Track response timing
     start_time = time.time()
@@ -452,7 +508,7 @@ def process_streaming_response(user_input: str):
                 with st.status("🤖 Processing your request...", expanded=True) as main_status:
                     main_status.update(label="🧠 **Agent initialized** - Analyzing your request...", state="running")
                     
-                    async for event in stream_agent_events(st.session_state.agent, user_input, config):
+                    async for event in stream_agent_events(st.session_state.agent, message_content, config):
                         event_type = event.get("event")
                         event_name = event.get("name", "")
                         
@@ -644,7 +700,7 @@ def process_streaming_response(user_input: str):
                 st.error(f"Streaming failed: {str(e)}")
                 st.info("🔄 Falling back to non-streaming mode...")
         
-        process_non_streaming_response(user_input)
+        process_non_streaming_response(user_input, message_content)
         return
     
     # Store the response in chat history regardless of streaming status
@@ -709,7 +765,7 @@ def process_streaming_response(user_input: str):
     st.rerun()
 
 
-def process_non_streaming_response(user_input: str):
+def process_non_streaming_response(user_input: str, message_content: Any):
     """Process user message with non-streaming response (original implementation) with reasoning detection."""
     # Track response timing
     start_time = time.time()
@@ -738,14 +794,14 @@ def process_non_streaming_response(user_input: str):
                 if config:
                     # For memory-enabled agents, use safe async call with reasonable timeout
                     response = safe_async_call(
-                        st.session_state.agent.ainvoke({"messages": [HumanMessage(user_input)]}, config),
+                        st.session_state.agent.ainvoke({"messages": [HumanMessage(content=message_content)]}, config),
                         "Failed to process message with memory",
                         timeout=600.0  # 10 minutes timeout for chat responses
                     )
                 else:
                     # For agents without memory, use safe async call with shorter timeout
                     response = safe_async_call(
-                        run_agent(st.session_state.agent, user_input),
+                        run_agent(st.session_state.agent, message_content),
                         "Failed to process message",
                         timeout=600.0  # 10 minutes timeout for simple chat
                     )
@@ -864,6 +920,49 @@ def process_non_streaming_response(user_input: str):
                 st.code(traceback.format_exc(), language="python")
     
     st.rerun()
+
+
+def render_attachment_uploader():
+    """Render file uploader and preview; store attachments in session state."""
+    with st.expander("📎 Attach files (PDF, TXT, images)", expanded=False):
+        uploaded = st.file_uploader(
+            "Choose files",
+            type=["pdf", "txt", "md", "png", "jpg", "jpeg", "gif", "webp"],
+            accept_multiple_files=True,
+            key="chat_file_uploader"
+        )
+        attachments = []
+        if uploaded:
+            for uf in uploaded:
+                try:
+                    data = uf.read()
+                except Exception:
+                    data = b""
+                name = getattr(uf, "name", "file")
+                ext = (name or "").lower()
+                if any(ext.endswith(e) for e in [".png", ".jpg", ".jpeg", ".gif", ".webp"]):
+                    kind = "image"
+                elif ext.endswith(".pdf"):
+                    kind = "pdf"
+                else:
+                    kind = "text"
+                attachments.append({"name": name, "data": data, "type": kind})
+        # Save to session state (overwrite to reflect current selection)
+        st.session_state.chat_attachments = attachments
+
+        # Preview summary
+        if attachments:
+            cols = st.columns([3, 1])
+            with cols[0]:
+                st.write("Selected:")
+                for a in attachments[:10]:
+                    st.caption(f"{a['name']} ({a['type']})")
+                if len(attachments) > 10:
+                    st.caption(f"...and {len(attachments) - 10} more")
+            with cols[1]:
+                if st.button("Clear", key="clear_attachments"):
+                    st.session_state.chat_attachments = []
+                    st.rerun()
 
 
 def handle_auto_save(assistant_response: str):
