@@ -10,7 +10,7 @@ import streamlit as st
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_core.tools import BaseTool
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 
 from .memory_tools import create_history_tool
 from .database import PersistentStorageManager
@@ -341,4 +341,159 @@ def extract_assistant_response(response: Dict) -> str:
     if ai_messages:
         return ai_messages[-1]
     
-    return "" 
+    return ""
+
+
+async def sync_imported_messages_to_checkpointer(imported_messages: List[Dict], thread_id: str = "default") -> bool:
+    """
+    Sync imported chat history messages to the LangGraph checkpointer.
+    
+    This function takes imported messages and runs them through the agent
+    to populate the checkpointer with the conversation history.
+    
+    Args:
+        imported_messages: List of message dictionaries from imported memory
+        thread_id: Thread ID to use for the checkpointer
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        if not hasattr(st.session_state, 'agent') or not st.session_state.agent:
+            return False
+        
+        if not hasattr(st.session_state, 'checkpointer') or not st.session_state.checkpointer:
+            return False
+        
+        agent = st.session_state.agent
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        # Process messages in pairs (user message followed by assistant response)
+        user_message = None
+        
+        for msg in imported_messages:
+            role = msg.get('role', '').lower()
+            content = msg.get('content', '')
+            
+            if not content:
+                continue
+                
+            if role == 'user':
+                user_message = content
+                
+            elif role == 'assistant' and user_message:
+                # We have a user-assistant pair, simulate the conversation
+                # by running the agent but bypassing the actual LLM call
+                try:
+                    # Create the message objects
+                    messages = [HumanMessage(content=user_message), AIMessage(content=content)]
+                    
+                    # Manually update the checkpointer state
+                    # This approach directly saves the conversation state to the checkpointer
+                    if hasattr(st.session_state.checkpointer, 'put'):
+                        # Build the checkpoint state that matches LangGraph's expected format
+                        from uuid import uuid4
+                        checkpoint_id = str(uuid4())
+                        
+                        # Create a checkpoint tuple that matches LangGraph's format
+                        checkpoint_state = {
+                            "messages": messages
+                        }
+                        
+                        # Save to checkpointer
+                        st.session_state.checkpointer.put(
+                            config=config,
+                            checkpoint={
+                                "v": 1,
+                                "ts": checkpoint_id,
+                                "id": checkpoint_id,
+                                "channel_values": checkpoint_state,
+                                "pending_sends": []
+                            },
+                            metadata={"source": "imported", "step": -1, "writes": {}}
+                        )
+                    
+                    user_message = None  # Reset for next pair
+                    
+                except Exception as e:
+                    # Log error but continue with other messages
+                    print(f"Error processing message pair: {str(e)}")
+                    user_message = None
+                    continue
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error syncing imported messages to checkpointer: {str(e)}")
+        return False
+
+
+def sync_imported_messages_to_checkpointer_sync(imported_messages: List[Dict], thread_id: str = "default") -> bool:
+    """
+    Synchronous wrapper for sync_imported_messages_to_checkpointer.
+    
+    Args:
+        imported_messages: List of message dictionaries from imported memory
+        thread_id: Thread ID to use for the checkpointer
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    from .utils import run_async
+    
+    try:
+        return run_async(sync_imported_messages_to_checkpointer(imported_messages, thread_id))
+    except Exception as e:
+        print(f"Error in sync wrapper: {str(e)}")
+        return False
+
+
+def simple_sync_imported_messages_to_checkpointer(imported_messages: List[Dict], thread_id: str = "default") -> bool:
+    """
+    Simplified approach to sync imported messages to checkpointer.
+    
+    This uses a simpler method by running actual agent calls with the imported messages
+    to ensure the checkpointer is properly populated.
+    
+    Args:
+        imported_messages: List of message dictionaries from imported memory  
+        thread_id: Thread ID to use for the checkpointer
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        if not hasattr(st.session_state, 'agent') or not st.session_state.agent:
+            return False
+        
+        agent = st.session_state.agent
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        # Create LangChain message objects from imported messages
+        langchain_messages = []
+        for msg in imported_messages:
+            role = msg.get('role', '').lower()
+            content = msg.get('content', '')
+            
+            if not content:
+                continue
+                
+            if role == 'user':
+                langchain_messages.append(HumanMessage(content=content))
+            elif role == 'assistant':
+                langchain_messages.append(AIMessage(content=content))
+        
+        # If we have messages, invoke the agent with the full conversation
+        # This will populate the checkpointer with the complete history
+        if langchain_messages:
+            # Run the agent with all the imported messages at once
+            # This should trigger the checkpointer to save the conversation state
+            from .utils import run_async
+            result = run_async(agent.ainvoke({"messages": langchain_messages}, config))
+            return True
+        
+        return False
+        
+    except Exception as e:
+        print(f"Error in simple sync: {str(e)}")
+        return False 

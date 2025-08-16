@@ -1935,7 +1935,25 @@ def render_import_memory_action():
                         if 'thread_id' in memory_data:
                             st.session_state.thread_id = memory_data['thread_id']
                         
-                        st.success(f"✅ Successfully imported {len(messages)} messages!")
+                        # Sync imported messages to LangGraph checkpointer if memory is enabled
+                        checkpointer_sync_success = False
+                        if (st.session_state.get('memory_enabled', False) and 
+                            hasattr(st.session_state, 'agent') and st.session_state.agent and
+                            hasattr(st.session_state, 'checkpointer') and st.session_state.checkpointer):
+                            from .agent_manager import simple_sync_imported_messages_to_checkpointer
+                            thread_id = st.session_state.get('thread_id', 'default')
+                            try:
+                                checkpointer_sync_success = simple_sync_imported_messages_to_checkpointer(messages, thread_id)
+                            except Exception as e:
+                                st.warning(f"⚠️ Could not sync messages to agent memory: {str(e)}")
+                        
+                        if checkpointer_sync_success:
+                            st.success(f"✅ Successfully imported {len(messages)} messages and synced to agent memory!")
+                        else:
+                            st.success(f"✅ Successfully imported {len(messages)} messages!")
+                            if st.session_state.get('memory_enabled', False):
+                                st.info("ℹ️ Messages imported to chat interface. Start a conversation to populate agent memory.")
+                        
                         st.rerun()
                 
                 with col2:
