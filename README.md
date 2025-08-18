@@ -8,12 +8,19 @@ This Streamlit application provides a user interface for connecting to MCP (Mode
 
 **This application is currently in active development.** While functional, you may encounter bugs, incomplete features, or unexpected behavior. We appreciate your patience and welcome feedback to help improve the application.
 
+### ⚠️ Known Regression: Google + MCP
+
+- Google Gemini models currently do not support MCP tool usage in this app.
+- For MCP-enabled sessions (tool calling), use OpenAI, Anthropic, or Ollama.
+- Google remains available in Chat-Only mode; MCP features are disabled for Google until further notice.
+
 ## Features
 
-- **Multi-Provider LLM Support**: OpenAI, Anthropic Claude, Google Gemini, and Ollama
+- **Multi-Provider LLM Support**: OpenAI, Anthropic Claude, Google Gemini, and Ollama (MCP unsupported for Google)
 - **OpenAI Reasoning Models Support**: Enhanced support for o3-mini, o4-mini with specialized parameter handling
 - **Streaming Responses**: Real-time token-by-token streaming for supported models
-- **MCP (Model Context Protocol) Integration**: Connect to MCP servers for tool access
+- **File Attachments & Multimodal Input**: Attach images, PDFs, and text/Markdown files to your chat messages (vision-capable models only for images)
+- **MCP (Model Context Protocol) Integration**: Connect to MCP servers for tool access (Google models currently unsupported)
 - **Advanced Memory Management**: Short-term session memory and persistent cross-session memory
 - **Multi-Server Support**: Connect to multiple MCP servers simultaneously
 - **Tool Testing Interface**: Test individual tools with custom parameters
@@ -25,6 +32,32 @@ This Streamlit application provides a user interface for connecting to MCP (Mode
 - **Containerized Deployment**: Easy Docker setup
 
 ![Chat Screenshot](screenshot2.png)
+
+## NEW - File Attachments (Multimodal Input)
+
+The application now supports attaching files to your chat messages.
+
+### Supported File Types
+- ✅ Images: PNG, JPG, JPEG, GIF, WEBP (requires a vision-capable model)
+- ✅ Documents: PDF (text extracted client-side)
+- ✅ Text: TXT, MD
+
+### How To Attach Files
+1. Drag and drop files directly onto the chat input, or
+2. Use the "📎 Attach files (PDF, TXT, images)" expander above the chat to select multiple files.
+
+Attachments are sent along with your next message and appear in the conversation metadata.
+
+### How It Works
+- **Images**: Sent as inline image blocks. Supported by OpenAI GPT-4o/o4 family, Anthropic Claude 3.x, and Google Gemini models. Not supported by Ollama in this app.
+- **PDFs**: Text is extracted locally using `pypdf` and included as contextual text alongside your prompt.
+- **Text/Markdown**: File contents are read and included as additional text context.
+
+### Provider Support Notes
+- **OpenAI**: Use vision-capable models (e.g., gpt-4o, o4-*, gpt-4.1, gpt-4-turbo) for images. Text/PDF work across text models.
+- **Anthropic**: Claude 3 family (Sonnet/Opus/Haiku) supports images and text.
+- **Google**: Gemini models support images and text (MCP tools unsupported in this app).
+- **Ollama**: Images not supported here; PDFs/Text are included as text.
 
 ## NEW - Streaming Support
 
@@ -78,7 +111,8 @@ The application now includes enhanced support for OpenAI's reasoning models with
   - **Reasoning Models**: o3-mini, o4-mini with specialized parameter handling (no temperature, max_completion_tokens, reasoning_effort)
   - **Unsupported**: o1, o1-mini, o1-preview (incompatible API requirements)
 - **Anthropic**: Claude-3.5-Sonnet, Claude-3-Opus, Claude-3-Haiku with temperature (0.0-1.0), max tokens (1-8192), timeout (10-600s)  
-- **Google**: Gemini-2.0-Flash, Gemini-2.5-Pro-Exp with temperature (0.0-2.0), max tokens (1-32768), timeout (10-600s)
+- **Google**: Gemini-2.0-Flash, Gemini-2.5-Pro-Exp with temperature (0.0-2.0), max tokens (1-32768), timeout (10-600s)  
+  - MCP: Not supported in this app currently; use Chat-Only mode for Google.
 - **Ollama**: Local models (Granite3.3:8b, Qwen3:4b) with temperature (0.0-2.0), max tokens (1-32768), timeout (10-600s)
 
 ### Custom Model Support
@@ -145,7 +179,7 @@ All providers now support an **"Other"** option that allows you to specify custo
 ## Future Improvements
 
 - **STDIO MCP Servers**: Support for connecting to MCP servers using standard input/output (STDIO) for more flexible server configurations
-- **RAG (File Upload)**: Enable Retrieval-Augmented Generation (RAG) by allowing users to upload files that the agent can use to enhance its responses
+- **RAG (Document Indexing)**: Index and retrieve from uploaded documents across sessions (attachments are supported now; full retrieval remains planned)
 - **Enhanced Tool Validation**: Advanced parameter validation and schema checking for MCP tools
 - **Multi-threaded Processing**: Parallel processing for multiple tool executions and server connections
 
@@ -200,6 +234,9 @@ The server will start on port 8000 by default. In the Streamlit app, you can con
   - Reasoning models don't support custom temperature settings
   - Some reasoning models may not support streaming (check the model-specific warnings)
 - **Custom Model Names**: When using "Other" option, ensure the model name is exactly as expected by the provider's API, and you have access to it.
+- **File Attachments**:
+  - Images require a vision-capable model (e.g., GPT-4o/o4, Claude 3.x, Gemini). Ollama is text-only here.
+  - PDF text extraction depends on the quality of the PDF; scanned images may yield limited text.
 
 ## Resources
 
