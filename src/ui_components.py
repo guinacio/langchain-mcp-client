@@ -18,11 +18,10 @@ from .llm_providers import (
     requires_api_key, create_llm_model, supports_streaming
 )
 from .mcp_client import (
-    setup_mcp_client, get_tools_from_client, create_single_server_config,
-    create_multi_server_config
+    create_single_server_config, create_multi_server_config, MCPConnectionManager
 )
 from .agent_manager import create_agent_with_tools
-from .utils import run_async, reset_connection_state, safe_async_call, format_error_message, model_supports_tools, create_download_data
+from .utils import run_async, reset_connection_state, format_error_message, model_supports_tools, create_download_data
 from .llm_providers import is_openai_reasoning_model, supports_streaming_for_reasoning_model
 
 
@@ -600,30 +599,33 @@ def handle_single_server_connection(llm_config: Dict, memory_config: Dict, serve
                     sse_read_timeout=300  # 5 minutes for SSE operations
                 )
                 
-                # Step 2: Initialize client
-                progress_placeholder.info("🌐 Initializing MCP client...")
-                client = safe_async_call(
-                    setup_mcp_client(server_config),
-                    "Failed to initialize MCP client",
-                    timeout=60.0  # 1 minute timeout for client setup
-                )
+                # Step 2: Initialize MCP connection manager
+                progress_placeholder.info("🌐 Initializing MCP connection manager...")
                 
-                if client is None:
-                    progress_placeholder.error("❌ Failed to initialize MCP client")
+                # Get or create the connection manager
+                mcp_manager = MCPConnectionManager.get_instance()
+                st.session_state.mcp_manager = mcp_manager
+                
+                # Start the connection
+                try:
+                    run_async(lambda: mcp_manager.start(server_config))
+                    if not mcp_manager.is_connected:
+                        progress_placeholder.error("❌ Failed to start MCP connection manager")
+                        return {"mode": "single", "connected": False}
+                except Exception as e:
+                    formatted_error = format_error_message(e)
+                    progress_placeholder.error(f"❌ Failed to start MCP connection manager: {formatted_error}")
                     return {"mode": "single", "connected": False}
-                
-                st.session_state.client = client
                 
                 # Step 3: Get tools
                 progress_placeholder.info("🔍 Retrieving tools from server...")
-                tools = safe_async_call(
-                    get_tools_from_client(st.session_state.client),
-                    "Failed to retrieve tools from MCP server",
-                    timeout=600.0  # 10 minutes timeout for tool retrieval
-                )
-                
-                if tools is None:
-                    progress_placeholder.error("❌ Failed to retrieve tools")
+                try:
+                    tools = run_async(lambda: mcp_manager.get_tools())
+                    if tools is None:
+                        tools = []
+                except Exception as e:
+                    formatted_error = format_error_message(e)
+                    progress_placeholder.error(f"❌ Failed to retrieve tools: {formatted_error}")
                     return {"mode": "single", "connected": False}
                 
                 st.session_state.tools = tools
@@ -684,24 +686,28 @@ def handle_multiple_servers_connection(llm_config: Dict, memory_config: Dict) ->
     
     with st.spinner("Connecting to MCP servers..."):
         try:
-            # Initialize the MCP client with all servers with context isolation
-            client = safe_async_call(
-                setup_mcp_client(st.session_state.servers),
-                "Failed to initialize MCP client for multiple servers"
-            )
+            # Initialize the MCP connection manager with all servers
+            mcp_manager = MCPConnectionManager.get_instance()
+            st.session_state.mcp_manager = mcp_manager
             
-            if client is None:
+            # Start the connection with multiple servers config
+            try:
+                run_async(lambda: mcp_manager.start(st.session_state.servers))
+                if not mcp_manager.is_connected:
+                    return {"mode": "multiple", "connected": False}
+            except Exception as e:
+                formatted_error = format_error_message(e)
+                st.error(f"❌ Failed to start MCP connection manager: {formatted_error}")
                 return {"mode": "multiple", "connected": False}
             
-            st.session_state.client = client
-            
-            # Get tools from the client with context isolation
-            tools = safe_async_call(
-                get_tools_from_client(st.session_state.client),
-                "Failed to retrieve tools from MCP servers"
-            )
-            
-            if tools is None:
+            # Get tools from the manager
+            try:
+                tools = run_async(lambda: mcp_manager.get_tools())
+                if tools is None:
+                    tools = []
+            except Exception as e:
+                formatted_error = format_error_message(e)
+                st.error(f"❌ Failed to retrieve tools: {formatted_error}")
                 return {"mode": "multiple", "connected": False}
             
             st.session_state.tools = tools
@@ -761,7 +767,13 @@ def handle_chat_only_connection(llm_config: Dict, memory_config: Dict) -> Dict:
         try:
             # Clear any existing MCP tools since we're in chat-only mode
             st.session_state.tools = []
-            st.session_state.client = None
+            # Close any existing MCP manager since we're in chat-only mode
+            if st.session_state.get('mcp_manager'):
+                try:
+                    run_async(lambda: st.session_state.mcp_manager.close())
+                except Exception:
+                    pass
+                st.session_state.mcp_manager = None
             
             # Create and configure agent
             success = create_and_configure_agent(llm_config, memory_config, [])
@@ -887,9 +899,31 @@ def render_configured_servers():
 
 
 def render_available_tools():
-    """Render the available tools section."""
-    if st.session_state.tools or (st.session_state.agent and st.session_state.get('memory_enabled', False)):
+    """Render the available tools section with connection status."""
+    # Show connection status
+    mcp_manager = st.session_state.get('mcp_manager')
+    if mcp_manager:
+        if mcp_manager.is_connected:
+            st.success("🟢 MCP Connection: Connected")
+        elif mcp_manager.running:
+            st.warning("🟡 MCP Connection: Reconnecting...")
+        else:
+            st.error("🔴 MCP Connection: Disconnected")
+    else:
+        st.info("⚫ MCP Connection: Not initialized")
+    
+    # Always show the tools header if we have a manager
+    if mcp_manager or st.session_state.get('agent'):
         st.header("Available Tools")
+        
+        # Add refresh button for tools
+        if mcp_manager and st.button("🔄 Refresh Tools"):
+            try:
+                tools = run_async(lambda: mcp_manager.get_tools(force_refresh=True))
+                st.session_state.tools = tools or []
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to refresh tools: {format_error_message(e)}")
         
         # Check if the current model supports tools
         model_name = st.session_state.get('selected_model', '')
@@ -899,6 +933,17 @@ def render_available_tools():
         mcp_tool_count = len(st.session_state.tools)
         memory_tool_count = 1 if st.session_state.get('memory_enabled', False) and supports_tools else 0
         total_tools = mcp_tool_count + memory_tool_count
+        
+        # Debug information
+        if mcp_manager:
+            with st.expander("🔧 Debug Information"):
+                st.write(f"**Manager running:** {mcp_manager.running}")
+                st.write(f"**Client exists:** {mcp_manager.client is not None}")
+                st.write(f"**Last heartbeat OK:** {mcp_manager.last_heartbeat_ok}")
+                st.write(f"**Tools in session state:** {len(st.session_state.tools)}")
+                st.write(f"**Tools in manager cache:** {len(mcp_manager.tools_cache)}")
+    
+    if st.session_state.tools or (st.session_state.agent and st.session_state.get('memory_enabled', False)):
         
         if not supports_tools and st.session_state.get('memory_enabled', False):
             st.info("🧠 Memory enabled (conversation history only - model doesn't support tool calling)")

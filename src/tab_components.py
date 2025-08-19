@@ -21,7 +21,7 @@ from .agent_manager import (
 )
 from .memory_tools import calculate_chat_statistics, format_chat_history_for_export
 from .utils import (
-    run_async, create_download_data, safe_async_call, format_error_message,
+    run_async, create_download_data, format_error_message,
     coerce_content_to_text, build_multimodal_human_content,
     get_system_info
 )
@@ -138,7 +138,8 @@ def render_status_indicators():
         with col1:
             # Connection status with detailed info
             if st.session_state.agent is not None:
-                if st.session_state.client is not None:
+                mcp_manager = st.session_state.get('mcp_manager')
+                if mcp_manager and mcp_manager.is_connected:
                     # Connected to MCP server(s)
                     server_count = len(st.session_state.get('servers', {})) if st.session_state.get('servers') else 1
                     tool_count = len(st.session_state.get('tools', []))
@@ -790,21 +791,18 @@ def process_non_streaming_response(user_input: str, message_content: Any):
             with st.status("🤖 Processing your request...", expanded=True) as main_status:
                 st.write("🧠 **Agent initialized** - Analyzing your request...")
                 
-                # Run the agent with context isolation and shorter timeout
-                if config:
-                    # For memory-enabled agents, use safe async call with reasonable timeout
-                    response = safe_async_call(
-                        st.session_state.agent.ainvoke({"messages": [HumanMessage(content=message_content)]}, config),
-                        "Failed to process message with memory",
-                        timeout=600.0  # 10 minutes timeout for chat responses
-                    )
-                else:
-                    # For agents without memory, use safe async call with shorter timeout
-                    response = safe_async_call(
-                        run_agent(st.session_state.agent, message_content),
-                        "Failed to process message",
-                        timeout=600.0  # 10 minutes timeout for simple chat
-                    )
+                # Run the agent
+                try:
+                    if config:
+                        # For memory-enabled agents
+                        response = run_async(lambda: st.session_state.agent.ainvoke({"messages": [HumanMessage(content=message_content)]}, config))
+                    else:
+                        # For agents without memory
+                        response = run_async(lambda: run_agent(st.session_state.agent, message_content))
+                except Exception as e:
+                    formatted_error = format_error_message(e)
+                    st.error(f"❌ Failed to process message: {formatted_error}")
+                    response = None
                 
                 if response is None:
                     main_status.update(label="❌ Processing failed", state="error")
