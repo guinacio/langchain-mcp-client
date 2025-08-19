@@ -643,15 +643,4 @@ def coerce_content_to_text(content: Any) -> str:
     # Fallback to string conversion
     return str(content) if content is not None else ""
 
-async def run_async_generator(async_gen):
-    """
-    Run an async generator and collect all results.
-    Useful for streaming functions that yield events.
-    """
-    results = []
-    try:
-        async for item in async_gen:
-            results.append(item)
-    except Exception as e:
-        st.error(f"Error in async generator: {str(e)}")
-    return results
+ 
