@@ -933,15 +933,6 @@ def render_available_tools():
         mcp_tool_count = len(st.session_state.tools)
         memory_tool_count = 1 if st.session_state.get('memory_enabled', False) and supports_tools else 0
         total_tools = mcp_tool_count + memory_tool_count
-        
-        # Debug information
-        if mcp_manager:
-            with st.expander("🔧 Debug Information"):
-                st.write(f"**Manager running:** {mcp_manager.running}")
-                st.write(f"**Client exists:** {mcp_manager.client is not None}")
-                st.write(f"**Last heartbeat OK:** {mcp_manager.last_heartbeat_ok}")
-                st.write(f"**Tools in session state:** {len(st.session_state.tools)}")
-                st.write(f"**Tools in manager cache:** {len(mcp_manager.tools_cache)}")
     
     if st.session_state.tools or (st.session_state.agent and st.session_state.get('memory_enabled', False)):
         
@@ -1084,4 +1075,4 @@ def render_tool_parameters(tool):
             param_desc.append(f"[default: {param_default}]")
 
         # Display parameter info
-        st.code(" ".join(param_desc)) 
+        st.code(" ".join(param_desc), wrap_lines=True) 
