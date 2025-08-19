@@ -8,11 +8,43 @@ and other shared functionality.
 import asyncio
 import json
 import datetime
+import logging
 from typing import Any, Dict, List
 import streamlit as st
 from langchain_core.callbacks import BaseCallbackHandler
 import base64
 from io import BytesIO
+
+logger = logging.getLogger(__name__)
+
+
+# Background task registry for cleanup
+def register_task(name: str, task: asyncio.Task) -> None:
+    """Register a background task for cleanup tracking."""
+    if '_bg_tasks' not in st.session_state:
+        st.session_state._bg_tasks = {}
+    st.session_state._bg_tasks[name] = task
+    logger.debug(f"Registered background task: {name}")
+
+
+def cancel_all_tasks() -> None:
+    """Cancel all registered background tasks."""
+    if '_bg_tasks' not in st.session_state:
+        return
+    
+    tasks = st.session_state._bg_tasks
+    if not tasks:
+        return
+    
+    logger.info(f"Cancelling {len(tasks)} background tasks")
+    
+    for name, task in tasks.items():
+        if not task.done():
+            logger.debug(f"Cancelling task: {name}")
+            task.cancel()
+    
+    # Clear the registry
+    st.session_state._bg_tasks = {}
 
 
 def run_async(coro_or_factory):
@@ -123,14 +155,19 @@ def initialize_session_state():
     if 'agent' not in st.session_state:
         st.session_state.agent = None
     
-    if 'client' not in st.session_state:
-        st.session_state.client = None
-    
     if 'checkpointer' not in st.session_state:
         st.session_state.checkpointer = None
     
     if 'servers' not in st.session_state:
         st.session_state.servers = {}
+    
+    # Initialize MCP connection manager (will be set by UI)
+    if 'mcp_manager' not in st.session_state:
+        st.session_state.mcp_manager = None
+    
+    # Initialize background task registry
+    if '_bg_tasks' not in st.session_state:
+        st.session_state._bg_tasks = {}
     
     # Initialize chat attachments buffer
     if 'chat_attachments' not in st.session_state:
@@ -167,10 +204,21 @@ def initialize_session_state():
 
 def reset_connection_state():
     """Reset connection-related session state."""
+    # Close MCP manager if it exists
+    if st.session_state.get('mcp_manager'):
+        try:
+            run_async(lambda: st.session_state.mcp_manager.close())
+        except Exception as e:
+            logger.warning(f"Error closing MCP manager during reset: {e}")
+    
+    # Cancel all background tasks
+    cancel_all_tasks()
+    
+    # Reset session state
     st.session_state.agent = None
-    st.session_state.client = None
     st.session_state.tools = []
     st.session_state.checkpointer = None
+    st.session_state.mcp_manager = None
     # Note: We don't reset Ollama connection state here since it's independent of agent state
 
 
@@ -260,45 +308,6 @@ def format_error_message(error: Exception) -> str:
         return "Connection timed out. The MCP server may be overloaded or unreachable."
     else:
         return error_msg
-
-
-def safe_async_call(coro_or_factory, error_message: str = "Async operation failed", timeout: float = 600.0):
-    """
-    Safely call an async function with improved error handling and timeout.
-    
-    Args:
-        coro: The coroutine to execute
-        error_message: Custom error message prefix
-        timeout: Maximum time to wait in seconds
-    
-    Returns:
-        Result of the coroutine or None if failed
-    """
-    try:
-        import inspect
-        # Always pass a factory to run_async so a fresh coroutine is created on retries
-        def factory():
-            if inspect.iscoroutine(coro_or_factory):
-                return asyncio.wait_for(coro_or_factory, timeout=timeout)
-            elif callable(coro_or_factory):
-                return asyncio.wait_for(coro_or_factory(), timeout=timeout)
-            else:
-                # Assume it's an awaitable-like object
-                return asyncio.wait_for(coro_or_factory, timeout=timeout)
-        return run_async(factory)
-    except asyncio.TimeoutError:
-        st.error(f"{error_message}: Operation timed out after {timeout} seconds")
-        st.info("💡 The server may be overloaded or unreachable. Try again or check the server status.")
-        return None
-    except Exception as e:
-        formatted_error = format_error_message(e)
-        st.error(f"{error_message}: {formatted_error}")
-        
-        # Show additional context for debugging
-        if "cannot enter context" in str(e) or "already entered" in str(e):
-            st.info("🔄 Context conflict detected - this is handled automatically")
-        
-        return None
 
 
 def format_timestamp(timestamp=None) -> str:
@@ -646,115 +655,3 @@ async def run_async_generator(async_gen):
     except Exception as e:
         st.error(f"Error in async generator: {str(e)}")
     return results
-
-
-def run_streaming_async(async_gen_func):
-    """
-    Run an async generator function with proper context management.
-    This is specifically designed for streaming operations.
-    """
-    try:
-        # Check if we're already in an async context
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        
-        if loop is None:
-            # No event loop running - create one and run the generator
-            return asyncio.run(run_async_generator(async_gen_func))
-        else:
-            # We're in an async context - use a new thread
-            import concurrent.futures
-            import threading
-            
-            result = None
-            exception = None
-            
-            def run_in_thread():
-                nonlocal result, exception
-                try:
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    result = new_loop.run_until_complete(run_async_generator(async_gen_func))
-                    new_loop.close()
-                except Exception as e:
-                    exception = e
-            
-            thread = threading.Thread(target=run_in_thread)
-            thread.start()
-            thread.join(timeout=600.0)  # 10 minute timeout
-            
-            if thread.is_alive():
-                raise TimeoutError("Streaming operation timed out")
-            
-            if exception:
-                raise exception
-                
-            return result
-            
-    except Exception as e:
-        st.error(f"Error running streaming async function: {str(e)}")
-        return []
-
-
-def run_async_coroutine(coro):
-    """
-    Run an async coroutine and return the result.
-    This is specifically for single coroutines, not generators.
-    """
-    try:
-        # Check if we're already in an async context
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        
-        if loop is None:
-            # No event loop running - create one and run the coroutine
-            future = asyncio.wait_for(coro, timeout=600.0)  # 10 minute max timeout
-            return asyncio.run(future)
-        else:
-            # We're in an async context - use a new thread
-            import threading
-            import queue
-            result_queue = queue.Queue()
-            exception_queue = queue.Queue()
-            completed = threading.Event()
-            
-            def run_in_thread():
-                try:
-                    # Create new event loop for this thread
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    
-                    # Run with timeout
-                    future = asyncio.wait_for(coro, timeout=600.0)
-                    result = new_loop.run_until_complete(future)
-                    result_queue.put(result)
-                except Exception as e:
-                    exception_queue.put(e)
-                finally:
-                    # Clean up the loop
-                    new_loop.close()
-                    completed.set()
-            
-            # Start thread
-            thread = threading.Thread(target=run_in_thread)
-            thread.daemon = True
-            thread.start()
-            
-            # Wait for completion with timeout
-            if completed.wait(610):  # Extra 10 seconds for thread overhead
-                if not result_queue.empty():
-                    return result_queue.get()
-                elif not exception_queue.empty():
-                    raise exception_queue.get()
-                else:
-                    raise RuntimeError("Thread completed but no result or exception found")
-            else:
-                raise TimeoutError("Operation timed out")
-                
-    except Exception as e:
-        st.error(f"Error running async coroutine: {str(e)}")
-        return None 
