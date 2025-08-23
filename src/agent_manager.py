@@ -97,8 +97,17 @@ def create_agent_with_tools(
     # Set up memory functionality if enabled
     if memory_enabled:
         if memory_type == "Persistent (Cross-session)" and persistent_storage:
-            # Use SQLite checkpointer for persistent storage
-            checkpointer = persistent_storage.get_checkpointer_sync()
+            # Prefer AsyncSqliteSaver for streaming compatibility
+            try:
+                from .utils import run_async
+                async_cp = run_async(lambda: persistent_storage.get_async_checkpointer())
+                if async_cp is not None:
+                    checkpointer = async_cp
+                else:
+                    # Fallback to in-memory to preserve streaming if async not available
+                    checkpointer = InMemorySaver()
+            except Exception:
+                checkpointer = InMemorySaver()
         else:
             # Use in-memory checkpointer for short-term storage
             checkpointer = InMemorySaver()

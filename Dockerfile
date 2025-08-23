@@ -1,27 +1,29 @@
-FROM python:3.10-slim
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-# Copy requirements first to leverage Docker cache
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install UV
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
-# Copy the rest of the application
-COPY app.py .
-COPY weather_server.py .
-COPY README.md .
+# Copy dependency files
+COPY pyproject.toml uv.lock ./
+
+# Sync dependencies (no dev)
+RUN uv sync --frozen --no-dev
+
+FROM python:3.12-slim
+WORKDIR /app
+
+# Copy virtualenv from builder
+COPY --from=builder /.venv /.venv
+ENV PATH="/.venv/bin:$PATH"
+
+# Copy application source
+COPY . .
 
 # Expose ports for Streamlit app and MCP server
 EXPOSE 8501
 EXPOSE 8000
 
-# Create a script to run both the MCP server and Streamlit app
-RUN echo '#!/bin/bash\n\
-python weather_server.py & \n\
-streamlit run app.py --server.port=8501 --server.address=0.0.0.0\n\
-' > /app/run.sh
-
-RUN chmod +x /app/run.sh
-
-# Run the script when the container launches
-CMD ["/app/run.sh"]
+# Default command: start MCP server and Streamlit
+CMD ["bash", "-lc", "python weather_server.py & streamlit run app.py --server.port=8501"]
