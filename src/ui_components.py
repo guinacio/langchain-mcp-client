@@ -43,6 +43,109 @@ async def test_ollama_connection(base_url: str = "http://localhost:11434") -> Tu
         return False, []
 
 
+async def fetch_openai_models(api_key: str) -> Tuple[bool, List[str], str]:
+    """Fetch available OpenAI models and filter to chat/reasoning models, excluding o1 series."""
+    if not api_key:
+        return False, [], "Missing API key"
+    try:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://api.openai.com/v1/models",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
+                if response.status != 200:
+                    return False, [], f"HTTP {response.status}"
+                data = await response.json()
+                ids = [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+                filtered: List[str] = []
+                for name in ids:
+                    lower = name.lower()
+                    # include common chat models and advanced reasoning (o3/o4), exclude non-chat classes
+                    include = (
+                        lower.startswith("gpt-") or lower.startswith("o3-") or lower.startswith("o4-") or lower == "gpt-4" or lower == "gpt-3.5-turbo"
+                    )
+                    exclude = (
+                        lower.startswith("o1") or "o1-" in lower or
+                        "embedding" in lower or "audio" in lower or "whisper" in lower or
+                        "realtime" in lower or "tts" in lower or "speech" in lower or
+                        "dall" in lower or "image" in lower
+                    )
+                    if include and not exclude:
+                        filtered.append(name)
+                # De-duplicate and sort
+                filtered = sorted(list({m for m in filtered}))
+                return True, filtered, ""
+    except Exception as e:
+        return False, [], str(e)
+
+
+async def fetch_anthropic_models(api_key: str) -> Tuple[bool, List[str], str]:
+    """Fetch available Anthropic models via their models endpoint."""
+    if not api_key:
+        return False, [], "Missing API key"
+    try:
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://api.anthropic.com/v1/models",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
+                if response.status != 200:
+                    return False, [], f"HTTP {response.status}"
+                data = await response.json()
+                # Response shape: { "data": [ {"id": "claude-...", ...}, ... ] }
+                ids = [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+                filtered = [m for m in ids if m and m.startswith("claude-")]
+                filtered = sorted(list({m for m in filtered}))
+                return True, filtered, ""
+    except Exception as e:
+        return False, [], str(e)
+
+
+async def fetch_google_models(api_key: str) -> Tuple[bool, List[str], str]:
+    """Fetch available Google Gemini models and map to model IDs."""
+    if not api_key:
+        return False, [], "Missing API key"
+    try:
+        params = {"key": api_key}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://generativelanguage.googleapis.com/v1beta/models",
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
+                if response.status != 200:
+                    return False, [], f"HTTP {response.status}"
+                data = await response.json()
+                models = data.get("models", [])
+                names: List[str] = []
+                for m in models:
+                    full_name = m.get("name", "")  # e.g., "models/gemini-1.5-pro"
+                    if not full_name:
+                        continue
+                    model_id = full_name.split("/")[-1]
+                    lower = model_id.lower()
+                    if not lower.startswith("gemini-"):
+                        continue
+                    # Prefer models that support generateContent (chat)
+                    methods = m.get("supportedGenerationMethods", []) or []
+                    if methods and not any("generate" in method for method in methods):
+                        continue
+                    names.append(model_id)
+                names = sorted(list({n for n in names}))
+                return True, names, ""
+    except Exception as e:
+        return False, [], str(e)
+
+
 def render_sidebar():
     """Render the main application sidebar with all configuration options."""
     with st.sidebar:
@@ -188,8 +291,54 @@ def render_standard_llm_configuration(llm_provider: str) -> Dict:
     # Store API key in session state for Config tab
     st.session_state.api_key = api_key
     
-    # Model selection
-    model_options = get_provider_models(llm_provider)
+    # Dynamic model fetching for cloud providers
+    dynamic_key = f"{llm_provider}_models_dynamic"
+    fetched_flag_key = f"{llm_provider}_models_fetched"
+    error_key = f"{llm_provider}_models_error"
+    if fetched_flag_key not in st.session_state:
+        st.session_state[fetched_flag_key] = False
+    if dynamic_key not in st.session_state:
+        st.session_state[dynamic_key] = []
+    if error_key not in st.session_state:
+        st.session_state[error_key] = ""
+
+    if llm_provider in ("OpenAI", "Anthropic", "Google"):
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            if st.button(f"Fetch {llm_provider} models"):
+                if not api_key:
+                    st.session_state[error_key] = "Enter API key first"
+                else:
+                    with st.spinner("Fetching models..."):
+                        if llm_provider == "OpenAI":
+                            success, models, err = run_async(lambda: fetch_openai_models(api_key))
+                        elif llm_provider == "Anthropic":
+                            success, models, err = run_async(lambda: fetch_anthropic_models(api_key))
+                        else:  # Google
+                            success, models, err = run_async(lambda: fetch_google_models(api_key))
+                        if success and models:
+                            st.session_state[dynamic_key] = models
+                            st.session_state[fetched_flag_key] = True
+                            st.session_state[error_key] = ""
+                        else:
+                            st.session_state[dynamic_key] = []
+                            st.session_state[fetched_flag_key] = False
+                            st.session_state[error_key] = err or "No models returned"
+        with col2:
+            if st.session_state.get(fetched_flag_key):
+                count = len(st.session_state.get(dynamic_key, []))
+                st.badge(f"Fetched {count} models", icon="🟢", color="green")
+            else:
+                st.badge("Not fetched", icon="🔴", color="red")
+            if st.session_state.get(error_key):
+                st.caption(f"Last error: {st.session_state.get(error_key)}")
+
+    # Model selection (prefer dynamically fetched list if available)
+    dynamic_models = st.session_state.get(dynamic_key, []) if llm_provider in ("OpenAI", "Anthropic", "Google") else []
+    if dynamic_models:
+        model_options = dynamic_models + ["Other"]
+    else:
+        model_options = get_provider_models(llm_provider)
     default_model = get_default_model(llm_provider)
     default_idx = model_options.index(default_model) if default_model in model_options else 0
     
@@ -203,7 +352,7 @@ def render_standard_llm_configuration(llm_provider: str) -> Dict:
     # Custom model input for providers that support "Other"
     if model_name == "Other":
         placeholder_text = {
-            "OpenAI": "Enter custom OpenAI model name (e.g. gpt-4-turbo, o1-mini, o3-mini)",
+            "OpenAI": "Enter custom OpenAI model name (e.g. gpt-4o, gpt-4, o3-mini)",
             "Anthropic": "Enter custom Anthropic model name (e.g. claude-3-sonnet-20240229)",
             "Google": "Enter custom Google model name (e.g. gemini-pro)"
         }.get(llm_provider, "Enter custom model name")

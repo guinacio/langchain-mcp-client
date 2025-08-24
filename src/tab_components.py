@@ -33,6 +33,21 @@ from .llm_providers import (
 )
 
 
+def _normalize_reasoning_tags(text: str) -> str:
+    """
+    Normalize various reasoning tag variants to <think>...</think> so a single parser works.
+    Supports: <thinking>, <reasoning>, <thought> (case-insensitive).
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    import re
+    # Opening tags
+    text = re.sub(r"<\s*(thinking|reasoning|thought)\s*>", "<think>", text, flags=re.IGNORECASE)
+    # Closing tags
+    text = re.sub(r"<\s*/\s*(thinking|reasoning|thought)\s*>", "</think>", text, flags=re.IGNORECASE)
+    return text
+
+
 def parse_reasoning_content(content: str) -> Dict[str, str]:
     """
     Parse content to extract thinking and final response.
@@ -43,6 +58,8 @@ def parse_reasoning_content(content: str) -> Dict[str, str]:
     Returns:
         Dict with 'thinking' and 'response' keys
     """
+    # Normalize to <think> to support Anthropic/Ollama variants
+    content = _normalize_reasoning_tags(content)
     thinking_pattern = r'<think>(.*?)</think>'
     
     # Find all thinking sections
@@ -81,6 +98,8 @@ def detect_reasoning_in_stream(text_buffer: str, thinking_round: int = 1) -> Dic
     
     # Find all thinking blocks
     import re
+    # Normalize variants before detection
+    text_buffer = _normalize_reasoning_tags(text_buffer)
     thinking_pattern = r'<think>(.*?)</think>'
     thinking_matches = list(re.finditer(thinking_pattern, text_buffer, re.DOTALL))
     

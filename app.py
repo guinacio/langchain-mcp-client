@@ -7,6 +7,7 @@ This refactored version uses modular components for better maintainability.
 
 import streamlit as st
 import nest_asyncio
+from pathlib import Path
 
 # Apply nest_asyncio to allow nested asyncio event loops (needed for Streamlit's execution model)
 nest_asyncio.apply()
@@ -27,15 +28,16 @@ from src.tab_components import (
 def main():
     """Main application entry point."""
     # Set page configuration
+    base_dir = Path(__file__).parent
     st.set_page_config(
         page_title="LangChain MCP Client",
-        page_icon="logo_transparent.png",
+        page_icon=str(base_dir / "logo_transparent.png"),
         layout="wide",
         initial_sidebar_state="expanded"
     )
 
     # Set logo
-    st.logo("side_logo.png", size="large")
+    st.logo(str(base_dir / "side_logo.png"), size="large")
 
     # Initialize session state with all required variables
     initialize_session_state()
