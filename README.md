@@ -191,33 +191,42 @@ git clone https://github.com/guinacio/langchain-mcp-client.git
 cd langchain-mcp-client
 ```
 
-2. Create a virtual environment and install dependencies:
+### Recommended: Install with UV
+
+UV manages a project-local `.venv` and pins from `pyproject.toml`/`uv.lock`.
+
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
+uv sync --all-extras --dev
 ```
 
-## Running the Application
+Run the app with UV:
 
-Run the Streamlit app with:
 ```bash
-streamlit run app.py
+uv run streamlit run app.py
 ```
 
 The application will be available at http://localhost:8501
 
-## Setting Up an MCP Server
+### Alternative: Install with pip and requirements.txt
 
-To use this application, you'll need an MCP server running or a valid URL to an MCP server. 
-Use the simple MCP server available on weather_server.py for a quick test:
-
-2. Install the MCP library:
 ```bash
-pip install mcp
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+streamlit run app.py
 ```
 
-3. Run the server:
+## Setting Up an MCP Server
+
+To use this application, you'll need an MCP server running or a valid URL to an MCP server.
+Use the simple MCP server available on `weather_server.py` for a quick test:
+
+Run with UV (recommended):
+```bash
+uv run python weather_server.py
+```
+
+Alternative (pip/venv):
 ```bash
 python weather_server.py
 ```
