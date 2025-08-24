@@ -41,6 +41,7 @@ class MCPConnectionManager:
         self.tools_cache: List[BaseTool] = []
         self.last_heartbeat_ok = False  # Start as False until first successful connection
         self._shutdown_registered = False
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
     
     @classmethod
     def get_instance(cls) -> 'MCPConnectionManager':
@@ -58,14 +59,19 @@ class MCPConnectionManager:
         """Cleanup method for atexit handler."""
         try:
             if self.running:
-                # Create new event loop if none exists
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                
-                loop.run_until_complete(self.close())
+                # Prefer using the original loop that created tasks
+                loop = self._loop
+                if loop and not loop.is_closed():
+                    if loop.is_running():
+                        try:
+                            fut = asyncio.run_coroutine_threadsafe(self.close(), loop)
+                            fut.result(timeout=2)
+                        except Exception as e:
+                            logger.error(f"Error during MCP connection cleanup (thread-safe): {e}")
+                    else:
+                        loop.run_until_complete(self.close())
+                else:
+                    logger.debug("Skipping MCP cleanup: no active event loop available")
         except Exception as e:
             logger.error(f"Error during MCP connection cleanup: {e}")
     
@@ -104,6 +110,7 @@ class MCPConnectionManager:
                 self.tools_cache = []
                 
                 # Start heartbeat task
+                self._loop = asyncio.get_running_loop()
                 self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
                 
             except Exception as e:
@@ -153,18 +160,16 @@ class MCPConnectionManager:
         if self.heartbeat_task:
             self.heartbeat_task.cancel()
             try:
-                await self.heartbeat_task
-            except asyncio.CancelledError:
-                pass
-            self.heartbeat_task = None
+                await self._drain_task(self.heartbeat_task)
+            finally:
+                self.heartbeat_task = None
         
         if self.reconnect_task:
             self.reconnect_task.cancel()
             try:
-                await self.reconnect_task
-            except asyncio.CancelledError:
-                pass
-            self.reconnect_task = None
+                await self._drain_task(self.reconnect_task)
+            finally:
+                self.reconnect_task = None
         
         # Close client if it has cleanup methods
         if self.client:
@@ -176,6 +181,43 @@ class MCPConnectionManager:
         self.server_config = None
         self.tools_cache = []
         self.last_heartbeat_ok = False
+        self._loop = None
+
+    async def _drain_task(self, task: asyncio.Task) -> None:
+        """Await a cancelled task on its owning loop to prevent pending destruction warnings."""
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        try:
+            task_loop = task.get_loop()
+        except Exception:
+            task_loop = None
+
+        # If we are on the same loop, await directly
+        if current_loop is not None and task_loop is current_loop:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            return
+
+        # If the task has a loop, schedule a drain coroutine on that loop
+        if task_loop is not None and not task_loop.is_closed():
+            try:
+                fut = asyncio.run_coroutine_threadsafe(self._drain_task_on_loop(task), task_loop)
+                try:
+                    fut.result(timeout=2)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+    async def _drain_task_on_loop(self, task: asyncio.Task) -> None:
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
     
     async def _heartbeat_loop(self, interval_sec: int = 45) -> None:
         """
@@ -201,6 +243,8 @@ class MCPConnectionManager:
             except Exception as e:
                 logger.warning(f"Heartbeat failed: {e}")
                 self.last_heartbeat_ok = False
+                if not self.running:
+                    break
                 self._ensure_reconnect()
     
     def _ensure_reconnect(self) -> None:

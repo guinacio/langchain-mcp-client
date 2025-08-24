@@ -14,6 +14,8 @@ from typing import Dict, List, Optional
 
 import streamlit as st
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
 
@@ -72,10 +74,25 @@ class PersistentStorageManager:
     
     def get_checkpointer_sync(self):
         """
-        Return an InMemorySaver to avoid async context issues.
-        We'll handle persistence manually.
+        Return a SqliteSaver-based checkpointer backed by this manager's DB.
+        Falls back to InMemorySaver if SQLite setup fails.
         """
-        return InMemorySaver()
+        try:
+            # Use a dedicated SQLite connection for LangGraph checkpointer
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            return SqliteSaver(conn)
+        except Exception:
+            return InMemorySaver()
+
+    async def get_async_checkpointer(self):
+        """
+        Create and return an AsyncSqliteSaver for async graph operations.
+        Returns None on failure; caller should handle fallback.
+        """
+        try:
+            return await AsyncSqliteSaver.from_conn_string(str(self.db_path))
+        except Exception:
+            return None
     
     def save_conversation_messages(self, thread_id: str, chat_history: List[Dict]):
         """
