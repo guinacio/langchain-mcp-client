@@ -1,0 +1,87 @@
+name: CI - Test and Coverage
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Create and activate virtualenv, then install dependencies
+        env:
+          XGRAPH_TOKEN: ${{ secrets.XGRAPH_TOKEN }}  
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          uv pip install "xgraph @ git+https://${XGRAPH_TOKEN}@github.com/xtillion/xgraph.git"
+          uv sync
+
+      - name: Run pytest with coverage
+        run: |
+          uv run pytest
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            tests/reports/
+      
+      - name: Inspect coverage folder
+        run: |
+          echo "Listing htmlcov contents:"
+          ls -la tests/reports/htmlcov
+          cat tests/reports/htmlcov/index.html || echo "index.html not found"
+
+      - name: Clone gh-pages branch
+        run: |
+          git clone --depth=1 --single-branch --branch gh-pages https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/${{ github.repository }} gh-pages
+      
+      - name: Copy coverage to PR folder
+        run: |
+          mkdir -p gh-pages/pr-${{ github.event.pull_request.number }}
+          cp -r tests/reports/htmlcov/* gh-pages/pr-${{ github.event.pull_request.number }}/
+      
+      - name: Commit and push to gh-pages
+        run: |
+          cd gh-pages
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          git add .
+          git commit -m "📊 Deploy coverage report for PR #${{ github.event.pull_request.number }}" || echo "No changes to commit"
+          git push origin gh-pages
+
+      - name: Comment PR with coverage link
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const url = `https://xtillion.github.io/${context.repo.repo}/pr-${prNumber}/`;
+            github.rest.issues.createComment({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🧪 **[Coverage Report for PR #${prNumber}](${url})**\n\nCheck the detailed HTML report for this pull request.`
+            });
