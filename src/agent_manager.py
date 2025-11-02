@@ -7,7 +7,7 @@ of LangGraph agents with various tools and memory configurations.
 
 from typing import Dict, List, Optional
 import streamlit as st
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_core.tools import BaseTool
 from langchain_core.messages import HumanMessage, AIMessage
@@ -124,16 +124,20 @@ def create_agent_with_tools(
         system_prompt = getattr(llm, '_system_prompt', None)
         
         # Create the agent with optional system prompt
+        # In LangGraph 1.0, create_react_agent is replaced by create_agent from langchain.agents
+        # The prompt parameter is renamed to system_prompt
         if system_prompt:
-            # Use the prompt parameter to add system prompt
-            agent = create_react_agent(
+            # Extract string from SystemMessage if needed
+            if hasattr(system_prompt, 'content'):
+                system_prompt = system_prompt.content
+            agent = create_agent(
                 llm, 
                 agent_tools, 
                 checkpointer=checkpointer, 
-                prompt=system_prompt
+                system_prompt=system_prompt
             )
         else:
-            agent = create_react_agent(llm, agent_tools, checkpointer=checkpointer)
+            agent = create_agent(llm, agent_tools, checkpointer=checkpointer)
     else:
         # Create a simple conversational agent without tools for models that don't support them
         def call_model(state: MessagesState):
