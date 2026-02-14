@@ -33,6 +33,12 @@ from .llm_providers import (
 )
 
 
+def _streaming_model_cache_key() -> str:
+    provider = st.session_state.get("llm_provider", "Unknown")
+    model = st.session_state.get("selected_model", "Unknown")
+    return f"{provider}::{model}"
+
+
 def _normalize_reasoning_tags(text: str) -> str:
     """
     Normalize various reasoning tag variants to <think>...</think> so a single parser works.
@@ -474,11 +480,16 @@ def process_user_message(user_input: str, message_content: Any):
     with st.chat_message("assistant"):
         # Check if streaming is enabled in session state
         streaming_enabled = st.session_state.get('enable_streaming', True)
+        cache_key = _streaming_model_cache_key()
+        forced_non_streaming_models = st.session_state.get("streaming_disabled_models", {})
+        forced_non_streaming = forced_non_streaming_models.get(cache_key, False)
         
-        if streaming_enabled:
+        if streaming_enabled and not forced_non_streaming:
             # Use streaming approach
             process_streaming_response(user_input, message_content)
         else:
+            if streaming_enabled and forced_non_streaming:
+                st.info("Streaming is disabled for this model in this session due to a prior streaming failure. Using non-streaming mode automatically.")
             # Use original non-streaming approach
             process_non_streaming_response(user_input, message_content)
 
@@ -714,11 +725,18 @@ def process_streaming_response(user_input: str, message_content: Any):
             thinking_content = "\n\n".join(final_thinking_list) if final_thinking_list else ""
             
     except Exception as e:
+        # Cache streaming failure for this provider/model for the current session.
+        cache_key = _streaming_model_cache_key()
+        if "streaming_disabled_models" not in st.session_state:
+            st.session_state.streaming_disabled_models = {}
+        st.session_state.streaming_disabled_models[cache_key] = True
+
         # Update main status to show error
         with main_status_container.container():
             with st.status("❌ Processing failed", expanded=True, state="error"):
                 st.error(f"Streaming failed: {str(e)}")
                 st.info("🔄 Falling back to non-streaming mode...")
+                st.info("💾 This model will use non-streaming automatically for the rest of this session.")
         
         process_non_streaming_response(user_input, message_content)
         return

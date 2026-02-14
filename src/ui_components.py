@@ -376,9 +376,9 @@ def render_standard_llm_configuration(llm_provider: str) -> Dict:
         else:
             st.warning("⚠️ **Reasoning Model Detected**: This model has special requirements - temperature and streaming are not supported. The model will use optimized parameters automatically.")
     
-    # Show chat-only mode message for Google models
+    # Show provider-specific guidance for Google models
     if llm_provider == "Google":
-        st.info("💬 **Chat-Only Mode**: Google models are currently running in chat-only mode. MCP tool integration may have limited compatibility with Gemini models.")
+        st.info("ℹ️ Google Gemini MCP tool calling is enabled on the latest dependency stack. If your provider account/model does not allow tools, switch to Chat-Only mode.")
     
     # Store selected model in session state for Config tab
     st.session_state.selected_model = model_name
@@ -617,9 +617,8 @@ def render_server_configuration(llm_config: Dict, memory_config: Dict) -> Dict:
     """Render MCP server configuration section."""
     st.header("MCP Server Configuration")
     
-    # Auto-select "No MCP Server (Chat Only)" for Google models due to limited MCP compatibility
     provider = llm_config.get("provider", "")
-    default_index = 2 if provider == "Google" else 0  # Index 2 = "No MCP Server (Chat Only)", Index 0 = "Single Server"
+    default_index = 0  # Index 0 = "Single Server"
     
     server_mode = st.radio(
         "Server Mode",

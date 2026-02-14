@@ -9,6 +9,7 @@ import asyncio
 import json
 import datetime
 import logging
+import threading
 from typing import Any, Dict, List
 import streamlit as st
 from langchain_core.callbacks import BaseCallbackHandler
@@ -16,6 +17,13 @@ import base64
 from io import BytesIO
 
 logger = logging.getLogger(__name__)
+
+
+# Shared async runner loop to prevent cross-loop resource issues.
+_async_runner_loop: asyncio.AbstractEventLoop | None = None
+_async_runner_thread: threading.Thread | None = None
+_async_runner_ready = threading.Event()
+_async_runner_lock = threading.Lock()
 
 
 # Background task registry for cleanup
@@ -65,37 +73,53 @@ def run_async(coro_or_factory):
         return coro_or_factory() if is_factory else coro_or_factory
 
     try:
-        # Check if we're already in an async context
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        
-        if loop is None:
-            # No event loop running - create one and run the coroutine
-            # Add a timeout to prevent infinite hanging
-            future = asyncio.wait_for(build_coro(), timeout=600.0)  # 10 minute max timeout
-            return asyncio.run(future)
-        else:
-            # We're in an async context, but need to handle it carefully
-            # Always run in a fresh loop to avoid conflicts
-            return _run_with_timeout_and_new_loop(build_coro(), timeout=600.0)
-                
+        runner_loop = _get_or_create_async_runner_loop()
+        future = asyncio.run_coroutine_threadsafe(
+            asyncio.wait_for(build_coro(), timeout=600.0),
+            runner_loop
+        )
+        return future.result(timeout=610.0)
+
     except (RuntimeError, asyncio.TimeoutError) as e:
         # Handle specific timeout and context errors
         if "TimeoutError" in str(type(e).__name__) or "timeout" in str(e).lower():
             raise TimeoutError("Operation timed out after 10 minutes") from e
-        else:
-            # Context conflict - try alternative approach with a fresh coroutine if possible
-            if is_factory:
-                return _run_with_timeout_and_new_loop(build_coro(), timeout=600.0)
-            raise
-    except Exception:
-        # Fallback: use new thread/loop with a fresh coroutine if possible
-        if is_factory:
-            return _run_with_timeout_and_new_loop(build_coro(), timeout=600.0)
-        # If not a factory, avoid reusing the same awaited coroutine
         raise
+    except Exception:
+        raise
+
+
+def _get_or_create_async_runner_loop() -> asyncio.AbstractEventLoop:
+    """Get the shared async runner loop, creating it once if needed."""
+    global _async_runner_loop, _async_runner_thread
+
+    if _async_runner_loop is not None and _async_runner_thread is not None and _async_runner_thread.is_alive():
+        return _async_runner_loop
+
+    with _async_runner_lock:
+        if _async_runner_loop is not None and _async_runner_thread is not None and _async_runner_thread.is_alive():
+            return _async_runner_loop
+
+        _async_runner_ready.clear()
+
+        def _runner() -> None:
+            global _async_runner_loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            _async_runner_loop = loop
+            _async_runner_ready.set()
+            loop.run_forever()
+
+        _async_runner_thread = threading.Thread(target=_runner, name="streamlit-async-runner", daemon=True)
+        _async_runner_thread.start()
+
+        if not _async_runner_ready.wait(timeout=5):
+            raise RuntimeError("Failed to initialize async runner loop")
+
+        if _async_runner_loop is None:
+            raise RuntimeError("Async runner loop not available after initialization")
+
+        return _async_runner_loop
 
 
 def _run_with_timeout_and_new_loop(coro, timeout: float = 600.0):
@@ -176,6 +200,11 @@ def initialize_session_state():
     # Initialize streaming setting
     if 'enable_streaming' not in st.session_state:
         st.session_state.enable_streaming = True
+
+    # Per-session cache of models that should force non-streaming.
+    # Key format: "<provider>::<model_name>"
+    if 'streaming_disabled_models' not in st.session_state:
+        st.session_state.streaming_disabled_models = {}
     
     # Initialize Ollama-specific settings
     if 'ollama_connected' not in st.session_state:

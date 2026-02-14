@@ -25,7 +25,7 @@ OPENAI_REASONING_MODELS = {
 # Model configurations for each provider
 LLM_PROVIDERS = {
     "OpenAI": {
-        "models": ["gpt-4o", "gpt-4", "gpt-3.5-turbo", "o3-mini", "o4-mini", "Other"],
+        "models": ["gpt-4o", "gpt-4.1", "o3-mini", "o4-mini", "Other"],
         "default_model": "gpt-4o",
         "requires_api_key": True,
         "description": "OpenAI's GPT models",
@@ -39,8 +39,8 @@ LLM_PROVIDERS = {
         "default_timeout": 600.0
     },
     "Anthropic": {
-        "models": ["claude-3-5-sonnet-20240620", "claude-3-opus-20240229", "claude-3-haiku-20240307", "Other"],
-        "default_model": "claude-3-5-sonnet-20240620",
+        "models": ["claude-sonnet-4-5", "claude-opus-4-1", "claude-3-5-haiku-latest", "Other"],
+        "default_model": "claude-sonnet-4-5",
         "requires_api_key": True,
         "description": "Anthropic's Claude models",
         "supports_system_prompt": True,
@@ -53,8 +53,8 @@ LLM_PROVIDERS = {
         "default_timeout": 600.0
     },
     "Google": {
-        "models": ["gemini-2.0-flash-001", "gemini-2.5-pro-exp-03-25", "Other"],
-        "default_model": "gemini-2.0-flash-001",
+        "models": ["gemini-2.5-flash-lite", "gemini-2.5-pro", "Other"],
+        "default_model": "gemini-2.5-flash-lite",
         "requires_api_key": True,
         "description": "Google's Gemini models",
         "supports_system_prompt": True,

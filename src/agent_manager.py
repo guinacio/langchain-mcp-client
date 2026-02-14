@@ -7,7 +7,7 @@ of LangGraph agents with various tools and memory configurations.
 
 from typing import Dict, List, Optional
 import streamlit as st
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_core.tools import BaseTool
 from langchain_core.messages import HumanMessage, AIMessage
@@ -15,6 +15,42 @@ from langchain_core.messages import HumanMessage, AIMessage
 from .memory_tools import create_history_tool
 from .database import PersistentStorageManager
 from .utils import model_supports_tools
+
+
+def _is_gemini_model_name(model_name: str) -> bool:
+    return "gemini" in (model_name or "").lower()
+
+
+def _schema_has_incompatible_additional_properties(schema_obj) -> bool:
+    """
+    Gemini rejects tool schemas with open-ended object properties.
+    Detect nested `additionalProperties` that are not explicitly `False`.
+    """
+    if isinstance(schema_obj, dict):
+        if "additionalProperties" in schema_obj and schema_obj["additionalProperties"] is not False:
+            return True
+        for value in schema_obj.values():
+            if _schema_has_incompatible_additional_properties(value):
+                return True
+    elif isinstance(schema_obj, list):
+        for item in schema_obj:
+            if _schema_has_incompatible_additional_properties(item):
+                return True
+    return False
+
+
+def _is_tool_schema_gemini_compatible(tool: BaseTool) -> bool:
+    args_schema = getattr(tool, "args_schema", None)
+    if args_schema is None:
+        return True
+    try:
+        if hasattr(args_schema, "model_json_schema"):
+            json_schema = args_schema.model_json_schema()
+            return not _schema_has_incompatible_additional_properties(json_schema)
+    except Exception:
+        # If schema introspection fails, don't block the tool pre-emptively.
+        return True
+    return True
 
 
 async def run_agent(agent, message_content) -> Dict:
@@ -74,21 +110,9 @@ def create_agent_with_tools(
     Returns:
         Configured agent and checkpointer
     """
-    from langgraph.graph import StateGraph, START, END
-    from langgraph.graph.message import MessagesState
-    from langchain_core.messages import BaseMessage
-    
     # Check if the model supports tools
     model_name = getattr(llm, 'model_name', getattr(llm, 'model', ''))
     supports_tools = model_supports_tools(model_name)
-    
-    # Additionally, try to test tool binding capability
-    if supports_tools:
-        try:
-            # Try to bind an empty list of tools to see if the model actually supports tool calling
-            test_model = llm.bind_tools([])
-        except Exception:
-            supports_tools = False
     
     # Start with MCP tools only if model supports tools
     agent_tools = []
@@ -119,43 +143,39 @@ def create_agent_with_tools(
         # Add history tool when memory is enabled and model supports tools
         if memory_enabled:
             agent_tools.append(create_history_tool())
-        
-        # Check if LLM has a system prompt
-        system_prompt = getattr(llm, '_system_prompt', None)
-        
-        # Create the agent with optional system prompt
-        if system_prompt:
-            # Use the prompt parameter to add system prompt
-            agent = create_react_agent(
-                llm, 
-                agent_tools, 
-                checkpointer=checkpointer, 
-                prompt=system_prompt
-            )
-        else:
-            agent = create_react_agent(llm, agent_tools, checkpointer=checkpointer)
+
+    # Gemini-specific schema compatibility filtering.
+    if supports_tools and _is_gemini_model_name(model_name):
+        agent_tools = [tool for tool in agent_tools if _is_tool_schema_gemini_compatible(tool)]
+        if not agent_tools and mcp_tools:
+            supports_tools = False
+
+    # Check if LLM has a system prompt
+    system_prompt = getattr(llm, '_system_prompt', None)
+
+    # Probe tool binding only when we actually have tools to bind.
+    # Some providers reject bind_tools([]), causing false negatives.
+    if supports_tools and agent_tools:
+        try:
+            llm.bind_tools(agent_tools[:1])
+        except Exception:
+            supports_tools = False
+            agent_tools = []
+
+    # Build v1 agent. If tools are unsupported, create a chat-only agent.
+    if system_prompt:
+        agent = create_agent(
+            model=llm,
+            tools=agent_tools if supports_tools else [],
+            checkpointer=checkpointer,
+            system_prompt=system_prompt
+        )
     else:
-        # Create a simple conversational agent without tools for models that don't support them
-        def call_model(state: MessagesState):
-            # Get system prompt if available
-            system_prompt = getattr(llm, '_system_prompt', None)
-            messages = state["messages"]
-            
-            if system_prompt and (not messages or not any(msg.type == "system" for msg in messages)):
-                from langchain_core.messages import SystemMessage
-                messages = [SystemMessage(content=system_prompt)] + messages
-            
-            response = llm.invoke(messages)
-            return {"messages": [response]}
-        
-        # Build a simple StateGraph for non-tool models
-        builder = StateGraph(MessagesState)
-        builder.add_node("call_model", call_model)
-        builder.add_edge(START, "call_model")
-        builder.add_edge("call_model", END)
-        
-        # Compile with checkpointer if memory is enabled
-        agent = builder.compile(checkpointer=checkpointer)
+        agent = create_agent(
+            model=llm,
+            tools=agent_tools if supports_tools else [],
+            checkpointer=checkpointer
+        )
     
     return agent, checkpointer
 

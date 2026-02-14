@@ -8,19 +8,19 @@ This Streamlit application provides a user interface for connecting to MCP (Mode
 
 **This application is currently in active development.** While functional, you may encounter bugs, incomplete features, or unexpected behavior. We appreciate your patience and welcome feedback to help improve the application.
 
-### ⚠️ Known Regression: Google + MCP
+### Gemini + MCP Status
 
-- Google Gemini models currently do not support MCP tool usage in this app.
-- For MCP-enabled sessions (tool calling), use OpenAI, Anthropic, or Ollama.
-- Google remains available in Chat-Only mode; MCP features are disabled for Google until further notice.
+- Google Gemini tool-calling with MCP is enabled on the latest dependency stack.
+- If your selected Gemini model/account cannot use tools, switch to Chat-Only mode.
+- For best results, keep dependencies synchronized with `uv sync`.
 
 ## Features
 
-- **Multi-Provider LLM Support**: OpenAI, Anthropic Claude, Google Gemini, and Ollama (MCP unsupported for Google)
+- **Multi-Provider LLM Support**: OpenAI, Anthropic Claude, Google Gemini, and Ollama
 - **OpenAI Reasoning Models Support**: Enhanced support for o3-mini, o4-mini with specialized parameter handling
 - **Streaming Responses**: Real-time token-by-token streaming for supported models
 - **File Attachments & Multimodal Input**: Attach images, PDFs, and text/Markdown files to your chat messages (vision-capable models only for images)
-- **MCP (Model Context Protocol) Integration**: Connect to MCP servers for tool access (Google models currently unsupported)
+- **MCP (Model Context Protocol) Integration**: Connect to MCP servers for tool access
 - **Advanced Memory Management**: Short-term session memory and persistent cross-session memory
 - **Multi-Server Support**: Connect to multiple MCP servers simultaneously
 - **Tool Testing Interface**: Test individual tools with custom parameters
@@ -56,7 +56,7 @@ Attachments are sent along with your next message and appear in the conversation
 ### Provider Support Notes
 - **OpenAI**: Use vision-capable models (e.g., gpt-4o, o4-*, gpt-4.1, gpt-4-turbo) for images. Text/PDF work across text models.
 - **Anthropic**: Claude 3 family (Sonnet/Opus/Haiku) supports images and text.
-- **Google**: Gemini models support images and text (MCP tools unsupported in this app).
+- **Google**: Gemini models support images, text, and MCP tool calling.
 - **Ollama**: Images not supported here; PDFs/Text are included as text.
 
 ## NEW - Streaming Support
@@ -111,8 +111,7 @@ The application now includes enhanced support for OpenAI's reasoning models with
   - **Reasoning Models**: o3-mini, o4-mini with specialized parameter handling (no temperature, max_completion_tokens, reasoning_effort)
   - **Unsupported**: o1, o1-mini, o1-preview (incompatible API requirements)
 - **Anthropic**: Claude-3.5-Sonnet, Claude-3-Opus, Claude-3-Haiku with temperature (0.0-1.0), max tokens (1-8192), timeout (10-600s)  
-- **Google**: Gemini-2.0-Flash, Gemini-2.5-Pro-Exp with temperature (0.0-2.0), max tokens (1-32768), timeout (10-600s)  
-  - MCP: Not supported in this app currently; use Chat-Only mode for Google.
+- **Google**: Gemini-2.5-Flash-Lite, Gemini-2.5-Pro with temperature (0.0-2.0), max tokens (1-32768), timeout (10-600s)
 - **Ollama**: Local models (Granite3.3:8b, Qwen3:4b) with temperature (0.0-2.0), max tokens (1-32768), timeout (10-600s)
 
 ### Custom Model Support
