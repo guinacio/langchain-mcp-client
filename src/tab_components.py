@@ -11,6 +11,8 @@ import datetime
 import time
 import traceback
 import re
+import queue
+import threading
 from typing import Dict, List, Any
 from langchain_core.messages import HumanMessage
 
@@ -553,10 +555,18 @@ def process_streaming_response(user_input: str, message_content: Any):
     main_status_container = st.empty()
     
     try:
+        # Capture references once on Streamlit thread. Background async fallback
+        # must not access st.session_state directly.
+        agent = st.session_state.get("agent")
+        if agent is None:
+            raise RuntimeError("Agent is not initialized")
+
         # Track if response streaming has started
         response_started = False
         thinking_stream_placeholder = None
         response_placeholder = None
+        tool_response_placeholder = None
+        tool_response_log = ""
         reasoning_complete = False
         text_buffer = ""
         all_thinking_content = []
@@ -569,17 +579,11 @@ def process_streaming_response(user_input: str, message_content: Any):
                 if config:
                     stream_kwargs["config"] = config
 
-                stream_iter = st.session_state.agent.stream(
-                    {"messages": [HumanMessage(content=message_content)]},
-                    **stream_kwargs
-                )
-
-                for item in stream_iter:
-                    # LangGraph yields (chunk, metadata) in stream_mode="messages"
-                    chunk = item[0] if isinstance(item, tuple) and item else item
-                    chunk_text = _extract_chunk_text(chunk)
+                def handle_stream_chunk_text(chunk_text: str) -> None:
+                    nonlocal text_buffer, reasoning_complete, thinking_content, current_response
+                    nonlocal response_started, response_placeholder, thinking_stream_placeholder, all_thinking_content
                     if not chunk_text:
-                        continue
+                        return
 
                     text_buffer += chunk_text
                     reasoning_info = detect_reasoning_in_stream(text_buffer, 1)
@@ -620,6 +624,77 @@ def process_streaming_response(user_input: str, message_content: Any):
                             response_placeholder = st.empty()
                         if response_started and response_placeholder is not None:
                             response_placeholder.write(current_response)
+
+                st.caption(":material/info: Async streaming enabled")
+
+                message_payload = {"messages": [HumanMessage(content=message_content)]}
+                stream_queue: "queue.Queue[tuple[str, Any]]" = queue.Queue()
+
+                async def collect_async_stream_chunks() -> None:
+                    async for item in agent.astream(message_payload, **stream_kwargs):
+                        # LangGraph yields (chunk, metadata) in stream_mode="messages".
+                        metadata = item[1] if isinstance(item, tuple) and len(item) > 1 and isinstance(item[1], dict) else {}
+                        node_name = metadata.get("langgraph_node")
+
+                        chunk = item[0] if isinstance(item, tuple) and item else item
+                        chunk_text = _extract_chunk_text(chunk)
+                        if not chunk_text:
+                            continue
+
+                        if node_name == "tools":
+                            tool_name = getattr(chunk, "name", None) or metadata.get("name") or "Tool"
+                            stream_queue.put(("tool", {"name": tool_name, "content": chunk_text}))
+                        else:
+                            stream_queue.put(("chunk", chunk_text))
+
+                def stream_worker() -> None:
+                    try:
+                        run_async(lambda: collect_async_stream_chunks())
+                    except Exception as stream_error:
+                        stream_queue.put(("error", f"{stream_error}\n\n{traceback.format_exc()}"))
+                    finally:
+                        stream_queue.put(("done", None))
+
+                worker = threading.Thread(
+                    target=stream_worker,
+                    name="agent-async-stream-worker",
+                    daemon=True
+                )
+                worker.start()
+
+                done = False
+                while not done:
+                    try:
+                        event_type, payload = stream_queue.get(timeout=0.1)
+                    except queue.Empty:
+                        # If worker ended and queue is empty, stop waiting.
+                        if not worker.is_alive():
+                            break
+                        continue
+
+                    if event_type == "chunk":
+                        handle_stream_chunk_text(payload)
+                    elif event_type == "tool":
+                        tool_name = payload.get("name", "Tool")
+                        tool_content = payload.get("content", "")
+                        if tool_content:
+                            main_status.update(label=f":material/handyman: **Tool response:** {tool_name}", state="running")
+                            if tool_response_placeholder is None:
+                                st.write("")
+                                st.write(":material/handyman: **Tool responses:**")
+                                tool_response_placeholder = st.empty()
+                            tool_response_log += f"\n\n**{tool_name}**\n\n{tool_content}"
+                            tool_response_placeholder.markdown(tool_response_log.strip())
+                            tool_executions.append({
+                                "tool_name": tool_name,
+                                "input": {},
+                                "output": tool_content,
+                                "timestamp": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                            })
+                    elif event_type == "error":
+                        raise RuntimeError(payload)
+                    elif event_type == "done":
+                        done = True
 
                 # Keep a consistent aggregated thinking output for chat history.
                 thinking_content = "\n\n".join(all_thinking_content) if all_thinking_content else thinking_content
