@@ -154,124 +154,90 @@ def render_chat_tab():
 
 
 def render_status_indicators():
-    """Render enhanced connection and memory status indicators."""
-    # Create a more sophisticated status display
+    """Render compact connection and memory status indicators."""
     with st.container():
-        # Main status row
-        col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
-        
+        col1, col2, col3, col4 = st.columns(4)
+
+        mcp_manager = st.session_state.get('mcp_manager')
+        memory_enabled = st.session_state.get('memory_enabled', False)
+        streaming_enabled = st.session_state.get('enable_streaming', True)
+        custom_config = st.session_state.get('config_use_custom_settings', False)
+        server_count = len(st.session_state.get('servers', {})) if st.session_state.get('servers') else 1
+        tool_count = len(st.session_state.get('tools', []))
+        chat_length = len(st.session_state.get('chat_history', []))
+        max_messages = st.session_state.get('max_messages', 100)
+        provider = st.session_state.get('llm_provider', 'Unknown')
+        model = st.session_state.get('selected_model', 'Unknown')
+
         with col1:
-            # Connection status with detailed info
             if st.session_state.agent is not None:
-                mcp_manager = st.session_state.get('mcp_manager')
                 if mcp_manager and mcp_manager.is_connected:
-                    # Connected to MCP server(s)
-                    server_count = len(st.session_state.get('servers', {})) if st.session_state.get('servers') else 1
-                    tool_count = len(st.session_state.get('tools', []))
-                    
-                    with st.status("📶 MCP Connection Active", expanded=False, state="complete"):
-                        if server_count > 1:
-                            st.write(f"**Connected to {server_count} MCP servers**")
-                        else:
-                            st.write("**Connected to MCP server**")
-                        
-                        if tool_count > 0:
-                            st.write(f"🔧 **{tool_count} tools available**")
-                            
-                            # Show tool categories if we have tools
-                            tools = st.session_state.get('tools', [])
-                            if tools:
-                                tool_names = [tool.name for tool in tools[:5]]  # Show first 5
-                                st.write("**Available tools:**")
-                                for tool_name in tool_names:
-                                    st.write(f"• {tool_name}")
-                                if len(tools) > 5:
-                                    st.write(f"• ... and {len(tools) - 5} more")
-                        else:
-                            st.write("⚠️ No tools available")
+                    st.badge("MCP connected", icon=":material/wifi:", color="green")
                 else:
-                    # Chat-only mode
-                    with st.status("💬 Chat-Only Mode", expanded=False, state="complete"):
-                        st.write("**Direct LLM conversation**")
-                        st.write("No MCP server connected")
-                        
-                        # Show model info if available
-                        provider = st.session_state.get('llm_provider', 'Unknown')
-                        model = st.session_state.get('selected_model', 'Unknown')
-                        st.write(f"**Model:** {provider} - {model}")
+                    st.badge("Chat only", icon=":material/chat_bubble:", color="blue")
             else:
-                # No agent initialized
-                with st.status("⚠️ Agent Not Ready", expanded=False, state="error"):
-                    st.write("**Please initialize an agent:**")
-                    st.write("• Connect to MCP server, or")
-                    st.write("• Start chat-only mode")
-                    st.write("Use the sidebar to get started!")
-        
+                st.badge("Agent not ready", icon=":material/warning:", color="red")
+
         with col2:
-            # Memory status with detailed info
-            memory_enabled = st.session_state.get('memory_enabled', False)
-            
             if memory_enabled:
-                memory_type = st.session_state.get('memory_type', 'Short-term (Session)')
-                thread_id = st.session_state.get('thread_id', 'default')
-                chat_length = len(st.session_state.get('chat_history', []))
-                max_messages = st.session_state.get('max_messages', 100)
-                
-                memory_status_label = "🧠 Memory Active"
-                if memory_type == "Persistent (Cross-session)":
-                    memory_status_label += " (Persistent)"
-                
-                with st.status(memory_status_label, expanded=False, state="complete"):
-                    st.write(f"**Type:** {memory_type.split()[0]}")
-                    st.write(f"**Thread:** {thread_id}")
-                    st.write(f"**Messages:** {chat_length}/{max_messages}")
-                    
-                    # Memory usage indicator
-                    usage_percent = (chat_length / max_messages) * 100
-                    if usage_percent > 80:
-                        st.warning(f"Memory usage: {usage_percent:.1f}% (Consider clearing)")
-                    elif usage_percent > 50:
-                        st.info(f"Memory usage: {usage_percent:.1f}%")
-                    else:
-                        st.success(f"Memory usage: {usage_percent:.1f}%")
-                    
-                    # Show persistent storage info if applicable
-                    if (memory_type == "Persistent (Cross-session)" and 
-                        hasattr(st.session_state, 'persistent_storage')):
-                        db_stats = st.session_state.persistent_storage.get_database_stats()
-                        st.write(f"**Database:** {db_stats.get('conversation_count', 0)} conversations")
+                st.badge("Memory enabled", icon=":material/psychology:", color="green")
             else:
-                with st.status("🧠 Memory Disabled", expanded=False, state="running"):
-                    st.write("**No conversation memory**")
-                    st.write("Each message is independent")
-                    st.info("Enable memory in sidebar for context retention")
-        
+                st.badge("Memory disabled", icon=":material/psychology:", color="gray")
+
         with col3:
-            # Quick actions and settings
-            with st.container():
-                # Streaming status
-                streaming_enabled = st.session_state.get('enable_streaming', True)
-                if streaming_enabled:
-                    st.success("🌊 Streaming ON")
-                else:
-                    st.info("🌊 Streaming OFF")
+            if streaming_enabled:
+                st.badge("Streaming on", icon=":material/stream:", color="green")
+            else:
+                st.badge("Streaming off", icon=":material/stream:", color="gray")
+
         with col4:
-            with st.container():    # Configuration status
-                custom_config = st.session_state.get('config_use_custom_settings', False)
-                if custom_config:
-                    st.info("⚙️ Custom Config")
+            if custom_config:
+                st.badge("Custom config", icon=":material/settings:", color="blue")
+            else:
+                st.badge("Default config", icon=":material/settings:", color="gray")
+
+    # Optional details below the compact badges
+    with st.expander(":material/info: Session details", expanded=False):
+        if st.session_state.agent is not None:
+            if mcp_manager and mcp_manager.is_connected:
+                if server_count > 1:
+                    st.write(f"Connected to {server_count} MCP servers")
                 else:
-                    st.text("⚙️ Default Config")
-    
-    # Show recent activity if available
+                    st.write("Connected to an MCP server")
+                st.caption(f"Tools available: {tool_count}")
+                if tool_count > 0:
+                    tools = st.session_state.get('tools', [])
+                    for tool_name in [tool.name for tool in tools[:5]]:
+                        st.write(f"- {tool_name}")
+                    if len(tools) > 5:
+                        st.caption(f"...and {len(tools) - 5} more")
+            else:
+                st.write("Direct LLM conversation without MCP tools")
+                st.caption(f"Model: {provider} - {model}")
+        else:
+            st.write("Initialize an agent from the sidebar to begin.")
+
+        if memory_enabled:
+            memory_type = st.session_state.get('memory_type', 'Short-term (Session)')
+            thread_id = st.session_state.get('thread_id', 'default')
+            usage_percent = (chat_length / max_messages) * 100 if max_messages else 0
+            st.caption(f"Memory type: {memory_type}")
+            st.caption(f"Thread: {thread_id}")
+            st.caption(f"Messages: {chat_length}/{max_messages} ({usage_percent:.1f}%)")
+            if memory_type == "Persistent (Cross-session)" and hasattr(st.session_state, 'persistent_storage'):
+                db_stats = st.session_state.persistent_storage.get_database_stats()
+                st.caption(f"Stored conversations: {db_stats.get('conversation_count', 0)}")
+        else:
+            st.caption("Memory is disabled. Enable it in the sidebar for context retention.")
+
     recent_tools = st.session_state.get('tool_executions', [])
     if recent_tools:
-        with st.expander("🔄 Recent Activity", expanded=False):
+        with st.expander("Recent activity", expanded=False, icon=":material/sync:"):
             # Show last 3 tool executions
             for tool_exec in recent_tools[-3:]:
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.write(f"🔧 **{tool_exec['tool_name']}**")
+                    st.write(f":material/handyman: **{tool_exec['tool_name']}**")
                 with col2:
                     st.caption(tool_exec.get('timestamp', 'Unknown'))
 
@@ -279,31 +245,52 @@ def render_status_indicators():
 def render_chat_history():
     """Render the enhanced chat history display with better formatting."""
     if not st.session_state.chat_history:
-        # Show welcome message when no chat history
-        with st.container():
-            st.markdown("""
-            <div style="text-align: center; padding: 2rem; background-color: #f0f2f6; border-radius: 10px; margin: 1rem 0;">
-                <h3>👋 Welcome to your MCP Playground!</h3>
-                <p>Start a conversation by typing a message below. I can help you with various tasks using connected tools.</p>
-            </div>
-            """, unsafe_allow_html=True)
+        st.html("""
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined');
+            .welcome-title {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.4rem;
+                margin: 0;
+            }
+            .welcome-icon {
+                font-family: 'Material Symbols Outlined';
+                font-weight: normal;
+                font-style: normal;
+                font-size: 28px;
+                line-height: 1;
+                letter-spacing: normal;
+                text-transform: none;
+                display: inline-block;
+                white-space: nowrap;
+                word-wrap: normal;
+                direction: ltr;
+                -webkit-font-feature-settings: 'liga';
+                -webkit-font-smoothing: antialiased;
+                vertical-align: middle;
+            }
+        </style>
+        <div style="text-align: center; padding: 2rem; background-color: #f0f2f6; border-radius: 10px; margin: 1rem 0;">
+            <h3 class="welcome-title"><span class="welcome-icon">waving_hand</span> Welcome to your MCP Playground!</h3>
+            <p>Start a conversation by typing a message below. I can help you with various tasks using connected tools.</p>
+        </div>
+        """)
         return
     
     # Display conversation statistics
-    with st.expander("📊 Conversation Stats", expanded=False):
+    with st.expander("Conversation stats", expanded=False, icon=":material/analytics:"):
         user_msgs = len([m for m in st.session_state.chat_history if m["role"] == "user"])
         assistant_msgs = len([m for m in st.session_state.chat_history if m["role"] == "assistant"])
         tool_executions = len(st.session_state.get('tool_executions', []))
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Your Messages", user_msgs)
+            st.metric("Your messages", user_msgs)
         with col2:
-            st.metric("AI Responses", assistant_msgs)
+            st.metric("AI responses", assistant_msgs)
         with col3:
-            st.metric("Tools Used", tool_executions)
-    
-    st.divider()
+            st.metric("Tools used", tool_executions)
     
     # Display chat messages with enhanced formatting
     for i, message in enumerate(st.session_state.chat_history):
@@ -313,7 +300,7 @@ def render_chat_history():
                 # Show attachments if any
                 attachments_meta = message.get("attachments", [])
                 if attachments_meta:
-                    with st.expander(f"📎 Attachments ({len(attachments_meta)})", expanded=False):
+                    with st.expander(f"Attachments ({len(attachments_meta)})", expanded=False, icon=":material/attach_file:"):
                         for meta in attachments_meta:
                             st.caption(f"{meta.get('name', 'file')} - {meta.get('type', '')}")
                 
@@ -325,12 +312,12 @@ def render_chat_history():
             with st.chat_message("assistant", avatar="🤖"):
                 # Show any tool executions that happened with this response
                 if "tool" in message and message["tool"]:
-                    with st.status("🔧 Tool executions for this response", expanded=False, state="complete"):
+                    with st.status(":material/handyman: Tool executions for this response", expanded=False, state="complete"):
                         st.code(message['tool'], language="text")
                 
                 # Display thinking content if available
                 if "thinking" in message and message["thinking"]:
-                    with st.expander("🧠 View Model Reasoning", expanded=False):
+                    with st.expander("View model reasoning", expanded=False, icon=":material/psychology:"):
                         st.write("**Model's thinking process:**")
                         st.write(message["thinking"])
                 
@@ -339,12 +326,12 @@ def render_chat_history():
                 
                 # Show timestamp, model info, and response time if available
                 if "timestamp" in message:
-                    caption_parts = [f"🕒 {message['timestamp']}"]
+                    caption_parts = [f":material/schedule: {message['timestamp']}"]
                     
                     # Add model information
                     if "model_provider" in message and "model_name" in message:
                         model_info = f"{message['model_provider']} - {message['model_name']}"
-                        caption_parts.append(f"🤖 {model_info}")
+                        caption_parts.append(f":material/smart_toy: {model_info}")
                     
                     # Add response time
                     if "response_time" in message:
@@ -353,21 +340,21 @@ def render_chat_history():
                             time_str = f"{response_time*1000:.0f}ms"
                         else:
                             time_str = f"{response_time:.1f}s"
-                        caption_parts.append(f"⌛ {time_str}")
+                        caption_parts.append(f":material/timer: {time_str}")
                     
                     # Add thinking indicator if thinking content exists
                     if "thinking" in message and message["thinking"]:
-                        caption_parts.append("🧠 Reasoning available")
+                        caption_parts.append(":material/psychology: Reasoning available")
                     
                     st.caption(" • ".join(caption_parts))
                 
                 # Show related tool executions from session state
                 message_tools = get_tools_for_message_index(i)
                 if message_tools:
-                    with st.expander(f"🔍 View tool details ({len(message_tools)} tools used)", expanded=False):
+                    with st.expander(f"View tool details ({len(message_tools)} tools used)", expanded=False, icon=":material/search:"):
                         for tool_exec in message_tools:
                             with st.container():
-                                st.write(f"**🔧 {tool_exec['tool_name']}**")
+                                st.write(f"**:material/handyman: {tool_exec['tool_name']}**")
                                 
                                 col1, col2 = st.columns([1, 1])
                                 with col1:
@@ -390,7 +377,6 @@ def render_chat_history():
                                         st.text(str(output))
                                 
                                 st.caption(f"Executed at {tool_exec.get('timestamp', 'Unknown time')}")
-                                st.divider()
 
 
 def get_tools_for_message_index(message_index: int) -> List[Dict]:
@@ -536,8 +522,8 @@ def process_streaming_response(user_input: str, message_content: Any):
             
             # Update main status
             with main_status_container.container():
-                with st.status("🤖 Processing your request...", expanded=True) as main_status:
-                    main_status.update(label="🧠 **Agent initialized** - Analyzing your request...", state="running")
+                with st.status(":material/smart_toy: Processing your request...", expanded=True) as main_status:
+                    main_status.update(label=":material/psychology: **Agent initialized** - Analyzing your request...", state="running")
                     
                     async for event in stream_agent_events(st.session_state.agent, message_content, config):
                         event_type = event.get("event")
@@ -546,7 +532,7 @@ def process_streaming_response(user_input: str, message_content: Any):
                         # Handle different event types with enhanced status updates
                         if event_type == "on_chain_start":
                             if "agent" in event_name.lower():
-                                main_status.update(label="🔍 **Agent reasoning** - Planning approach...", state="running")
+                                main_status.update(label=":material/search: **Agent reasoning** - Planning approach...", state="running")
                                 thinking_phase = True
                         
                         elif event_type == "on_tool_start":
@@ -555,14 +541,14 @@ def process_streaming_response(user_input: str, message_content: Any):
                             tool_input = event.get("data", {}).get("input", {})
                             
                             if thinking_phase:
-                                main_status.update(label="✅ **Planning complete** - Ready to execute tools", state="complete")
+                                main_status.update(label=":material/check_circle: **Planning complete** - Ready to execute tools", state="complete")
                                 thinking_phase = False
                                 tool_phase = True
                             
                             # Track tool execution without nested status
-                            main_status.update(label=f"🔧 **Starting tool:** {tool_name}", state="running")
+                            main_status.update(label=f":material/handyman: **Starting tool:** {tool_name}", state="running")
                             if tool_input:
-                                st.write(f"🔧 Using tool: {tool_name}")
+                                st.write(f":material/handyman: Using tool: {tool_name}")
                         
                         elif event_type == "on_tool_end":
                             # Tool execution completed
@@ -570,8 +556,8 @@ def process_streaming_response(user_input: str, message_content: Any):
                             tool_output = event.get("data", {}).get("output", "")
                             tool_input = event.get("data", {}).get("input", {})
                             
-                            main_status.update(label=f"✅ **Completed tool:** {tool_name}", state="complete")
-                            st.write(f"🔧 Finished using tool: {tool_name}")
+                            main_status.update(label=f":material/check_circle: **Completed tool:** {tool_name}", state="complete")
+                            st.write(f":material/handyman: Finished using tool: {tool_name}")
                             
                             # Store tool execution data
                             tool_executions.append({
@@ -590,7 +576,7 @@ def process_streaming_response(user_input: str, message_content: Any):
                         
                         elif event_type == "on_chat_model_start":
                             if tool_phase:
-                                main_status.update(label="🎯 **Tool execution complete** - Generating response...", state="running")
+                                main_status.update(label=":material/my_location: **Tool execution complete** - Generating response...", state="running")
                                 tool_phase = False
                         
                         elif event_type == "on_chat_model_stream":
@@ -613,13 +599,13 @@ def process_streaming_response(user_input: str, message_content: Any):
                                     # Display thinking in status container
                                     if thinking_stream_placeholder is None:
                                         if thinking_round == 1:
-                                            main_status.update(label="🧠 **AI is thinking...**", state="running")
+                                            main_status.update(label=":material/psychology: **AI is thinking...**", state="running")
                                         else:
-                                            main_status.update(label=f"🧠 **AI is thinking** (round {thinking_round})...", state="running")
+                                            main_status.update(label=f":material/psychology: **AI is thinking** (round {thinking_round})...", state="running")
                                         thinking_stream_placeholder = st.empty()
                                     
                                     with thinking_stream_placeholder:
-                                        st.text(f"🧠 {current_thinking}")
+                                        st.text(f"{current_thinking}")
                                     
                                     # Check if thinking is complete
                                     if reasoning_info['thinking_complete']:
@@ -635,9 +621,9 @@ def process_streaming_response(user_input: str, message_content: Any):
                                         
                                         # Show completion of this thinking round
                                         if thinking_round > 1:
-                                            st.badge(f"**Thinking round {thinking_round} complete!**", icon="✅")
+                                            st.badge(f"Thinking round {thinking_round} complete", icon=":material/check_circle:", color="green")
                                         else:
-                                            st.badge("**Thinking complete!**", icon="✅")
+                                            st.badge("Thinking complete", icon=":material/check_circle:", color="green")
                                 
                                 elif reasoning_complete:
                                     # Thinking is complete, accumulate and stream response content
@@ -646,10 +632,9 @@ def process_streaming_response(user_input: str, message_content: Any):
                                         
                                         # Start streaming response inside status container
                                         if not response_started:
-                                            main_status.update(label="💬 **Streaming response...**", state="running")
+                                            main_status.update(label=":material/stream: **Streaming response...**", state="running")
                                             response_started = True
-                                            st.divider()  # Add separator after thinking
-                                            st.write("💬 **Final Response:**")
+                                            st.write(":material/chat_bubble: **Final response:**")
                                             response_placeholder = st.empty()
                                         
                                         # Update response in real-time inside status container
@@ -661,9 +646,9 @@ def process_streaming_response(user_input: str, message_content: Any):
                                     
                                     # Start streaming response inside status container
                                     if not response_started:
-                                        main_status.update(label="💬 **Streaming response...**", state="running")
+                                        main_status.update(label=":material/stream: **Streaming response...**", state="running")
                                         response_started = True
-                                        st.write("💬 **Final Response:**")
+                                        st.write(":material/chat_bubble: **Final response:**")
                                         response_placeholder = st.empty()
                                     
                                     # Update response in real-time inside status container
@@ -693,10 +678,10 @@ def process_streaming_response(user_input: str, message_content: Any):
                                     
                                     # Show thinking if we haven't already
                                     if not reasoning_complete:
-                                        st.write("🧠 **Model reasoning detected**")
+                                        st.write(":material/psychology: **Model reasoning detected**")
                                         
                                         # Display thinking content inside the current status container
-                                        st.text(f"🧠 {thinking_content}")
+                                        st.text(f"{thinking_content}")
                                         
                                         # Add to accumulated thinking content
                                         all_thinking_content.append(thinking_content)
@@ -708,10 +693,10 @@ def process_streaming_response(user_input: str, message_content: Any):
                     # Update main status when processing is complete
                     if current_response:
                         main_status.update(
-                            label="✅ Response complete",
+                            label=":material/check_circle: Response complete",
                             state="complete"
                         )
-                        main_status.update(label="📝 **Processing complete** - Streaming response...", state="complete")
+                        main_status.update(label=":material/edit_note: **Processing complete** - Streaming response...", state="complete")
             
             return current_response, tool_executions, all_thinking_content
         
@@ -733,10 +718,10 @@ def process_streaming_response(user_input: str, message_content: Any):
 
         # Update main status to show error
         with main_status_container.container():
-            with st.status("❌ Processing failed", expanded=True, state="error"):
-                st.error(f"Streaming failed: {str(e)}")
-                st.info("🔄 Falling back to non-streaming mode...")
-                st.info("💾 This model will use non-streaming automatically for the rest of this session.")
+            with st.status(":material/error: Processing failed", expanded=True, state="error"):
+                st.error(f"Streaming failed: {str(e)}", icon=":material/error:")
+                st.info("Falling back to non-streaming mode...", icon=":material/sync:")
+                st.info("This model will use non-streaming automatically for the rest of this session.", icon=":material/save:")
         
         process_non_streaming_response(user_input, message_content)
         return
@@ -825,8 +810,8 @@ def process_non_streaming_response(user_input: str, message_content: Any):
         
         # Update main status
         with main_status_container.container():
-            with st.status("🤖 Processing your request...", expanded=True) as main_status:
-                st.write("🧠 **Agent initialized** - Analyzing your request...")
+            with st.status(":material/smart_toy: Processing your request...", expanded=True) as main_status:
+                st.write(":material/psychology: **Agent initialized** - Analyzing your request...")
                 
                 # Run the agent
                 try:
@@ -838,15 +823,15 @@ def process_non_streaming_response(user_input: str, message_content: Any):
                         response = run_async(lambda: run_agent(st.session_state.agent, message_content))
                 except Exception as e:
                     formatted_error = format_error_message(e)
-                    st.error(f"❌ Failed to process message: {formatted_error}")
+                    st.error(f"Failed to process message: {formatted_error}", icon=":material/error:")
                     response = None
                 
                 if response is None:
-                    main_status.update(label="❌ Processing failed", state="error")
-                    st.error("Failed to get response from agent. Please try again.")
+                    main_status.update(label=":material/error: Processing failed", state="error")
+                    st.error("Failed to get response from agent. Please try again.", icon=":material/error:")
                     return
                 
-                st.write("🔍 **Agent reasoning** - Processing your request...")
+                st.write(":material/search: **Agent reasoning** - Processing your request...")
                 
                 # Process response
                 tool_executions = extract_tool_executions_from_response(response)
@@ -854,9 +839,9 @@ def process_non_streaming_response(user_input: str, message_content: Any):
                 
                 # Handle tool executions if any
                 if tool_executions:
-                    st.write("🔧 **Tool executions detected**")
+                    st.write(":material/handyman: **Tool executions detected**")
                     for execution in tool_executions:
-                        st.write(f"✅ **Completed tool:** {execution['tool_name']}")
+                        st.write(f":material/check_circle: **Completed tool:** {execution['tool_name']}")
                 
                 if assistant_response:
                     # Parse the response for reasoning content
@@ -864,27 +849,25 @@ def process_non_streaming_response(user_input: str, message_content: Any):
                     
                     # Display thinking if present inside status container
                     if parsed_content['thinking']:
-                        st.write("🧠 **AI is thinking...**")
-                        st.text(f"💭 {parsed_content['thinking']}")
+                        st.write(":material/psychology: **AI is thinking...**")
+                        st.text(f"{parsed_content['thinking']}")
                         thinking_content = parsed_content['thinking']
                     
                     # Set the final response
                     current_response = parsed_content['response'] if parsed_content['response'] else assistant_response
                     
                     # Display response inside status container
-                    if thinking_content:
-                        st.divider()  # Add separator after thinking
-                    st.write("💬 **Final Response:**")
+                    st.write(":material/chat_bubble: **Final response:**")
                     st.write(current_response)
                     
                     # Update main status when processing is complete
                     main_status.update(
-                        label="✅ Response complete",
+                        label=":material/check_circle: Response complete",
                         state="complete"
                     )
                 else:
-                    main_status.update(label="⚠️ No response content", state="error")
-                    st.warning("No response content found.")
+                    main_status.update(label=":material/warning: No response content", state="error")
+                    st.warning("No response content found.", icon=":material/warning:")
                     return
             
             # Add to chat history with metadata, timing, and model info
@@ -942,7 +925,7 @@ def process_non_streaming_response(user_input: str, message_content: Any):
                 st.session_state.tool_executions.extend(new_executions)
                 
                 # Show execution summary with enhanced status (consistent with streaming)
-                with st.status(f"📊 Tool Execution Summary", expanded=False, state="complete"):
+                with st.status(":material/analytics: Tool execution summary", expanded=False, state="complete"):
                     st.write(f"**Executed {len(new_executions)} tool(s) successfully:**")
                     for execution in new_executions:
                         st.write(f"• **{execution['tool_name']}** at {execution['timestamp']}")
@@ -950,8 +933,8 @@ def process_non_streaming_response(user_input: str, message_content: Any):
     except Exception as e:
         # Update main status to show error
         with main_status_container.container():
-            with st.status("❌ Processing failed", expanded=True, state="error"):
-                st.error(f"Non-streaming processing failed: {str(e)}")
+            with st.status(":material/error: Processing failed", expanded=True, state="error"):
+                st.error(f"Non-streaming processing failed: {str(e)}", icon=":material/error:")
                 st.code(traceback.format_exc(), language="python")
     
     st.rerun()
@@ -959,7 +942,7 @@ def process_non_streaming_response(user_input: str, message_content: Any):
 
 def render_attachment_uploader():
     """Render file uploader and preview; store attachments in session state."""
-    with st.expander("📎 Attach files (PDF, TXT, images)", expanded=False):
+    with st.expander("Attach files (PDF, TXT, images)", expanded=False, icon=":material/attach_file:"):
         uploaded = st.file_uploader(
             "Choose files",
             type=["pdf", "txt", "md", "png", "jpg", "jpeg", "gif", "webp"],
@@ -1035,65 +1018,68 @@ def handle_chat_error(error: Exception):
     # Check for specific error types for better user guidance
     error_msg = str(error)
     if "All connection attempts failed" in error_msg:
-        st.error("⚠️ Could not connect to Ollama. Please make sure Ollama is running by executing 'ollama serve' in a terminal.")
-        st.info("To start Ollama, open a terminal/command prompt and run: `ollama serve`")
+        st.error("Could not connect to Ollama. Please make sure Ollama is running by executing 'ollama serve' in a terminal.", icon=":material/warning:")
+        st.info("To start Ollama, open a terminal/command prompt and run: `ollama serve`", icon=":material/info:")
     elif "cannot enter context" in error_msg or "already entered" in error_msg:
-        st.error("🔄 Context conflict detected. Retrying with isolated context...")
-        st.info("💡 This can happen with external MCP servers. The system will handle this automatically.")
+        st.error("Context conflict detected. Retrying with isolated context...", icon=":material/sync:")
+        st.info("This can happen with external MCP servers. The system will handle this automatically.", icon=":material/tips_and_updates:")
     elif "timeout" in error_msg.lower():
-        st.error("⏱️ Request timed out. The server may be overloaded or unreachable.")
-        st.info("💡 Try again in a moment, or check your MCP server connection.")
+        st.error("Request timed out. The server may be overloaded or unreachable.", icon=":material/timer:")
+        st.info("Try again in a moment, or check your MCP server connection.", icon=":material/tips_and_updates:")
     else:
-        st.error(f"❌ Error processing your request: {formatted_error}")
+        st.error(f"Error processing your request: {formatted_error}", icon=":material/error:")
     
     # Show technical details in expandable section
-    with st.expander("🔧 Technical Details"):
+    with st.expander("Technical details", icon=":material/handyman:"):
         st.code(traceback.format_exc(), language="python")
 
 
 def render_test_tools_tab():
     """Render the tool testing interface tab."""
-    st.header("🔧 Test Tools Individually")
+    st.header("Test tools individually", anchor=False)
+    st.caption("Search tools, configure parameters, run tests, and inspect results.")
+
     # Toolbar with quick tips and counts
-    cols = st.columns([2, 1])
-    with cols[0]:
-        with st.popover("Tips & Shortcuts"):
-            st.markdown("- Use the search to quickly find tools\n- Import parameters from JSON\n- Save and reuse presets for repeated tests\n- Preview result in multiple formats")
-    with cols[1]:
-        total = len(st.session_state.get('tools', []))
-        st.caption(f"Tools available: {total}")
-    st.divider()
-    
+    with st.container(border=True):
+        cols = st.columns([2, 1], vertical_alignment="center")
+        with cols[0]:
+            with st.popover("Tips and shortcuts"):
+                st.markdown("- Use search to quickly find tools\n- Import parameters from JSON\n- Save and reuse presets for repeated tests\n- Preview result in multiple formats")
+        with cols[1]:
+            total = len(st.session_state.get('tools', []))
+            st.metric("Tools available", total, border=True)
     if not st.session_state.tools:
-        st.warning("⚠️ No tools available. Please connect to an MCP server first.")
-        st.info("Go to the sidebar to connect to an MCP server, then return to this tab to test tools.")
+        st.warning("No tools available. Please connect to an MCP server first.", icon=":material/warning:")
+        st.info("Go to the sidebar to connect to an MCP server, then return to this tab to test tools.", icon=":material/info:")
         return
     
     # Tool selection and information
-    selected_tool = render_tool_selection()
+    with st.container(border=True):
+        selected_tool = render_tool_selection()
     if not selected_tool:
         return
 
     # Side-by-side: parameters (left) and execution (right)
-    st.divider()
     col_params, col_exec = st.columns([2, 1])
     with col_params:
-        tool_params, missing_required = render_tool_parameters_form(selected_tool)
+        with st.container(border=True):
+            tool_params, missing_required = render_tool_parameters_form(selected_tool)
     with col_exec:
-        render_tool_execution_controls(selected_tool, tool_params, missing_required)
+        with st.container(border=True, height="stretch"):
+            render_tool_execution_controls(selected_tool, tool_params, missing_required)
     
     # Test results display
-    st.divider()
-    render_test_results(selected_tool.name)
+    with st.container(border=True):
+        render_test_results(selected_tool.name)
     
     # Testing summary
-    st.divider()
-    render_testing_summary()
+    with st.container(border=True):
+        render_testing_summary()
 
 
 def render_tool_selection():
     """Render tool selection interface."""
-    st.subheader("Select Tool to Test")
+    st.subheader("Select tool to test")
     # Search and filters
     fcols = st.columns([2, 1])
     with fcols[0]:
@@ -1140,7 +1126,7 @@ def render_tool_selection():
 
 def render_selected_tool_info(selected_tool, selected_tool_name):
     """Render information about the selected tool."""
-    st.subheader("Tool Information")
+    st.subheader("Tool information")
     
     col1, col2 = st.columns([2, 1])
     
@@ -1155,25 +1141,25 @@ def render_selected_tool_info(selected_tool, selected_tool_name):
                     schema_dict = schema.schema() if hasattr(schema, 'schema') else schema
                     st.json(schema_dict)
                 else:
-                    st.info("This tool has no parameters.")
+                    st.caption("This tool has no parameters.")
             except Exception as _e:
-                st.info("Schema not available.")
+                st.caption("Schema not available.")
     
     with col2:
         # Tool execution statistics
         tool_stats = st.session_state.get('tool_test_stats', {})
         if selected_tool_name in tool_stats:
             stats = tool_stats[selected_tool_name]
-            st.metric("Tests Run", stats.get('count', 0))
-            st.metric("Success Rate", f"{stats.get('success_rate', 0):.1f}%")
-            st.metric("Avg Time", f"{stats.get('avg_time', 0):.2f}s")
+            st.metric("Tests run", stats.get('count', 0))
+            st.metric("Success rate", f"{stats.get('success_rate', 0):.1f}%")
+            st.metric("Avg time", f"{stats.get('avg_time', 0):.2f}s")
         else:
             st.caption("No runs yet")
 
 
 def render_tool_parameters_form(tool):
     """Render dynamic form for tool parameters."""
-    st.subheader("Tool Parameters")
+    st.subheader("Tool parameters")
     
     tool_params = {}
     required_params = []
@@ -1207,9 +1193,9 @@ def render_tool_parameters_form(tool):
                         st.error(f"Invalid JSON: {e}")
             tool_params = render_parameter_inputs(properties, required_params)
         else:
-            st.info("This tool doesn't require any parameters.")
+            st.caption("This tool does not require any parameters.")
     else:
-        st.info("This tool doesn't require any parameters.")
+        st.caption("This tool does not require any parameters.")
     
     # Validate required parameters
     missing_required = []
@@ -1220,7 +1206,7 @@ def render_tool_parameters_form(tool):
                 missing_required.append(req_param)
     
     if missing_required:
-        st.warning(f"⚠️ Required parameters missing: {', '.join(missing_required)}")
+        st.warning(f"Required parameters missing: {', '.join(missing_required)}", icon=":material/warning:")
     
     return tool_params, missing_required
 
@@ -1287,24 +1273,19 @@ def render_parameter_inputs(properties, required_params):
 
 def render_tool_execution_controls(tool, tool_params, missing_required):
     """Render tool execution controls."""
-    st.subheader("Execute Tool")
+    st.subheader("Execute tool")
     
-    col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
-    
-    with col1:
-        if st.button("🚀 Run Tool", type="primary", disabled=len(missing_required) > 0):
+    with st.container(horizontal=True, horizontal_alignment="distribute"):
+        if st.button("Run tool", type="primary", icon=":material/rocket_launch:", disabled=len(missing_required) > 0):
             execute_tool_test(tool, tool_params)
-    
-    with col2:
-        if st.button("🗑️ Clear Results"):
+
+        if st.button("Clear results", icon=":material/delete:"):
             clear_test_results()
-    
-    with col3:
-        if st.button("📋 Copy Parameters as JSON"):
+
+        if st.button("Copy parameters as JSON", icon=":material/content_copy:"):
             params_json = json.dumps(tool_params, indent=2)
             st.code(params_json, language="json")
 
-    with col4:
         with st.popover("Presets"):
             # Initialize presets store
             if 'tool_param_presets' not in st.session_state:
@@ -1351,7 +1332,7 @@ def execute_tool_test(tool, tool_params):
             store_test_result(tool.name, tool_params, result, True, execution_time, start_time)
             update_test_statistics(tool.name, True, execution_time)
             
-            st.success(f"✅ Tool executed successfully in {execution_time:.2f} seconds!")
+            st.success(f"Tool executed successfully in {execution_time:.2f} seconds!", icon=":material/check_circle:")
             st.rerun()
             
         except Exception as e:
@@ -1362,7 +1343,7 @@ def execute_tool_test(tool, tool_params):
             store_test_result(tool.name, tool_params, None, False, execution_time, start_time, str(e))
             update_test_statistics(tool.name, False, execution_time)
             
-            st.error(f"❌ Tool execution failed: {str(e)}")
+            st.error(f"Tool execution failed: {str(e)}", icon=":material/error:")
             st.code(traceback.format_exc(), language="python")
 
 
@@ -1413,7 +1394,7 @@ def clear_test_results():
         st.session_state.tool_test_results = []
     if 'tool_test_stats' in st.session_state:
         st.session_state.tool_test_stats = {}
-    st.success("Results cleared!")
+    st.success("Results cleared", icon=":material/check_circle:")
     st.rerun()
 
 
@@ -1422,7 +1403,7 @@ def render_test_results(tool_name):
     if 'tool_test_results' not in st.session_state or not st.session_state.tool_test_results:
         return
     
-    st.subheader("Test Results")
+    st.subheader("Test results")
     
     # Filter results for current tool
     current_tool_results = [r for r in st.session_state.tool_test_results if r['tool_name'] == tool_name]
@@ -1431,13 +1412,13 @@ def render_test_results(tool_name):
         render_latest_result(current_tool_results[0])
         render_result_history(current_tool_results[1:] if len(current_tool_results) > 1 else [])
     else:
-        st.info("No test results for this tool yet.")
+        st.caption("No test results for this tool yet.")
 
 
 def render_latest_result(result):
     """Render the latest test result."""
     if result['success']:
-        st.success("✅ Latest Result")
+        st.success("Latest result", icon=":material/check_circle:")
         tabs = st.tabs(["Pretty", "JSON", "Raw", "Meta"])
         with tabs[0]:
             if isinstance(result['result'], (dict, list)):
@@ -1458,7 +1439,7 @@ def render_latest_result(result):
                 st.write("Parameters:")
                 st.json(result['parameters'])
     else:
-        st.error("❌ Latest Result")
+        st.error("Latest result", icon=":material/error:")
         tabs = st.tabs(["Error", "Params", "Meta"])
         with tabs[0]:
             st.code(result.get('error', ''), language="text")
@@ -1475,7 +1456,7 @@ def render_result_history(history_results):
     if not history_results:
         return
     
-    with st.expander(f"Previous Results ({len(history_results)})"):
+    with st.expander(f"Previous results ({len(history_results)})"):
         fcols = st.columns([1, 2])
         with fcols[0]:
             status_filter = st.radio("Filter", options=["All", "Success", "Failed"], horizontal=True, key="history_status_filter")
@@ -1490,7 +1471,7 @@ def render_result_history(history_results):
                 text_blob = json.dumps(result.get('result')) if not isinstance(result.get('result'), str) else result.get('result')
                 if search_q.lower() not in str(text_blob).lower():
                     continue
-            status = "✅" if result['success'] else "❌"
+            status = ":material/check_circle:" if result['success'] else ":material/error:"
             time_str = datetime.datetime.fromisoformat(result['timestamp']).strftime("%H:%M:%S")
             st.write(f"**{status} Test #{i + 1}** - {time_str} ({result['execution_time']:.2f}s)")
             if result['success']:
@@ -1501,7 +1482,6 @@ def render_result_history(history_results):
                     st.text(display_text)
             else:
                 st.error(f"Error: {result.get('error', '')}")
-            st.divider()
 
 
 def render_testing_summary():
@@ -1509,7 +1489,7 @@ def render_testing_summary():
     if 'tool_test_results' not in st.session_state or not st.session_state.tool_test_results:
         return
     
-    st.subheader("Testing Summary")
+    st.subheader("Testing summary")
     
     col1, col2, col3 = st.columns(3)
     
@@ -1518,19 +1498,19 @@ def render_testing_summary():
     overall_success_rate = (successful_tests / total_tests) * 100 if total_tests > 0 else 0
     
     with col1:
-        st.metric("Total Tests", total_tests)
-        st.metric("Success Rate", f"{overall_success_rate:.1f}%")
+        st.metric("Total tests", total_tests)
+        st.metric("Success rate", f"{overall_success_rate:.1f}%")
     
     with col2:
         if st.session_state.tool_test_results:
             avg_execution_time = sum(r['execution_time'] for r in st.session_state.tool_test_results) / len(st.session_state.tool_test_results)
             tools_tested = len(set(r['tool_name'] for r in st.session_state.tool_test_results))
             
-            st.metric("Avg Execution Time", f"{avg_execution_time:.2f}s")
-            st.metric("Tools Tested", tools_tested)
+            st.metric("Avg execution time", f"{avg_execution_time:.2f}s")
+            st.metric("Tools tested", tools_tested)
     
     with col3:
-        if st.button("📁 Export Test Results"):
+        if st.button("Export test results", icon=":material/download:"):
             export_test_results(total_tests, successful_tests, overall_success_rate)
 
 
@@ -1555,7 +1535,7 @@ def export_test_results(total_tests, successful_tests, overall_success_rate):
         
         json_str, filename = create_download_data(export_data, "tool_test_results")
         st.download_button(
-            label="Download JSON Report",
+            label="Download JSON report",
             data=json_str,
             file_name=filename,
             mime="application/json"
@@ -1564,26 +1544,32 @@ def export_test_results(total_tests, successful_tests, overall_success_rate):
 
 def render_memory_tab():
     """Render the memory management tab."""
-    st.header("🧠 Memory Management")
+    st.header("Memory management")
+    st.caption("Manage conversation persistence, history, import/export, and memory hygiene.")
     
     # Memory status overview
-    render_memory_status_overview()
-    st.divider()
+    with st.container(border=True):
+        render_memory_status_overview()
     
     # Enhanced memory configuration
-    render_memory_configuration_section()
+    with st.container(border=True):
+        render_memory_configuration_section()
     
     # Database management for persistent storage
-    render_database_management_section()
+    with st.container(border=True):
+        render_database_management_section()
     
     # Memory actions
-    render_memory_actions_section()
+    with st.container(border=True):
+        render_memory_actions_section()
     
     # Conversation history viewer
-    render_conversation_history_section()
+    with st.container(border=True):
+        render_conversation_history_section()
     
     # Memory tips
-    render_memory_tips()
+    with st.container(border=True):
+        render_memory_tips()
 
 
 def render_memory_status_overview():
@@ -1593,19 +1579,19 @@ def render_memory_status_overview():
     with col1:
         memory_enabled = st.session_state.get('memory_enabled', False)
         if memory_enabled:
-            st.success("Memory: Enabled")
+            st.success("Memory: enabled", icon=":material/check_circle:")
         else:
-            st.info("Memory: Disabled")
+            st.caption("Memory: disabled")
     
     with col2:
         if memory_enabled:
             memory_type = st.session_state.get('memory_type', 'Short-term (Session)')
             thread_id = st.session_state.get('thread_id', 'default')
-            st.info(f"Type: {memory_type.split()[0]}")
-            st.info(f"Thread: {thread_id}")
+            st.caption(f"Type: {memory_type.split()[0]}")
+            st.caption(f"Thread: {thread_id}")
         else:
-            st.info("Type: N/A")
-            st.info("Thread: N/A")
+            st.caption("Type: N/A")
+            st.caption("Thread: N/A")
     
     with col3:
         chat_length = len(st.session_state.get('chat_history', []))
@@ -1614,7 +1600,7 @@ def render_memory_status_overview():
 
 def render_memory_configuration_section():
     """Render enhanced memory configuration section."""
-    st.subheader("Memory Configuration")
+    st.subheader("Memory configuration")
     
     col1, col2 = st.columns(2)
     
@@ -1628,7 +1614,7 @@ def render_memory_configuration_section():
 def render_memory_toggle_and_type():
     """Render memory toggle and type selection."""
     new_memory_enabled = st.toggle(
-        "Enable Memory",
+        "Enable memory",
         value=st.session_state.get('memory_enabled', False),
         help="Enable or disable conversation memory"
     )
@@ -1637,12 +1623,12 @@ def render_memory_toggle_and_type():
         st.session_state.memory_enabled = new_memory_enabled
         if 'agent' in st.session_state:
             st.session_state.agent = None
-        st.success(f"Memory {'enabled' if new_memory_enabled else 'disabled'}. Please reconnect to MCP server.")
+        st.success(f"Memory {'enabled' if new_memory_enabled else 'disabled'}. Please reconnect to MCP server.", icon=":material/check_circle:")
         st.rerun()
     
     if new_memory_enabled:
         new_memory_type = st.selectbox(
-            "Storage Type",
+            "Storage type",
             options=["Short-term (Session)", "Persistent (Cross-session)"],
             index=0 if st.session_state.get('memory_type', 'Short-term (Session)') == 'Short-term (Session)' else 1,
             help="Choose memory persistence level"
@@ -1652,7 +1638,7 @@ def render_memory_toggle_and_type():
             st.session_state.memory_type = new_memory_type
             if 'agent' in st.session_state:
                 st.session_state.agent = None
-            st.info(f"Memory type changed to: {new_memory_type}. Please reconnect to MCP server.")
+            st.info(f"Memory type changed to: {new_memory_type}. Please reconnect to MCP server.", icon=":material/info:")
             st.rerun()
         
         new_thread_id = st.text_input(
@@ -1671,13 +1657,13 @@ def render_memory_toggle_and_type():
                     loaded_messages = st.session_state.persistent_storage.load_conversation_messages(new_thread_id)
                     if loaded_messages:
                         st.session_state.chat_history = loaded_messages
-                        st.info(f"Loaded {len(loaded_messages)} messages for thread: {new_thread_id}")
+                        st.info(f"Loaded {len(loaded_messages)} messages for thread: {new_thread_id}", icon=":material/info:")
                     else:
-                        st.info(f"Started new thread: {new_thread_id}")
+                        st.info(f"Started new thread: {new_thread_id}", icon=":material/info:")
                 except Exception as e:
-                    st.warning(f"Could not load conversation history: {str(e)}")
+                    st.warning(f"Could not load conversation history: {str(e)}", icon=":material/warning:")
             else:
-                st.info(f"Switched to thread: {new_thread_id}")
+                st.info(f"Switched to thread: {new_thread_id}", icon=":material/info:")
             st.rerun()
 
 
@@ -1685,7 +1671,7 @@ def render_memory_limits_and_storage():
     """Render memory limits and storage information."""
     if st.session_state.get('memory_enabled', False):
         max_messages = st.number_input(
-            "Maximum Messages",
+            "Maximum messages",
             min_value=10,
             max_value=1000,
             value=st.session_state.get('max_messages', 100),
@@ -1699,7 +1685,7 @@ def render_memory_limits_and_storage():
                 st.session_state.persistent_storage = PersistentStorageManager()
             
             db_stats = st.session_state.persistent_storage.get_database_stats()
-            st.info("📊 Database Statistics")
+            st.caption(":material/analytics: Database statistics")
             st.text(f"Conversations: {db_stats.get('conversation_count', 0)}")
             st.text(f"Total Messages: {db_stats.get('total_messages', 0)}")
             st.text(f"Size: {db_stats.get('database_size_mb', 0)} MB")
@@ -1711,32 +1697,27 @@ def render_database_management_section():
         st.session_state.get('memory_type') == "Persistent (Cross-session)" and 
         hasattr(st.session_state, 'persistent_storage')):
         
-        st.subheader("📚 Conversation Database")
+        st.subheader(":material/library_books: Conversation database")
         render_database_actions()
         render_stored_conversations()
 
 
 def render_database_actions():
     """Render database action buttons."""
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        if st.button("💾 Save Current", type="primary"):
+    with st.container(horizontal=True, horizontal_alignment="distribute"):
+        if st.button("Save current", type="primary", icon=":material/save:"):
             save_current_conversation()
-    
-    with col2:
-        if st.button("🔄 Refresh List"):
+
+        if st.button("Refresh list", icon=":material/sync:"):
             st.rerun()
-    
-    with col3:
-        if st.button("📊 Database Stats"):
+
+        if st.button("Database stats", icon=":material/analytics:"):
             stats = st.session_state.persistent_storage.get_database_stats()
             st.json(stats)
-    
-    with col4:
-        if st.button("🗑️ Clear All"):
+
+        if st.button("Clear all", icon=":material/delete:"):
             if st.checkbox("Confirm deletion", key="confirm_clear_all"):
-                st.warning("Clear all functionality needs to be implemented")
+                st.warning("Clear all functionality needs to be implemented", icon=":material/warning:")
 
 
 def save_current_conversation():
@@ -1756,23 +1737,23 @@ def save_current_conversation():
             message_count=len(st.session_state.chat_history),
             last_message=st.session_state.chat_history[-1].get('content', '') if st.session_state.chat_history else ''
         )
-        st.success("Conversation saved to database!")
+        st.success("Conversation saved to database", icon=":material/check_circle:")
         st.rerun()
     else:
-        st.warning("No conversation to save")
+        st.warning("No conversation to save", icon=":material/warning:")
 
 
 def render_stored_conversations():
     """Render list of stored conversations."""
     conversations = st.session_state.persistent_storage.list_conversations()
     if conversations:
-        st.write(f"**Stored Conversations ({len(conversations)})**")
+        st.write(f"**Stored conversations ({len(conversations)})**")
         
         for i, conv in enumerate(conversations):
-            with st.expander(f"📄 {conv.get('title', conv['thread_id'])} ({conv.get('message_count', 0)} messages)"):
+            with st.expander(f"{conv.get('title', conv['thread_id'])} ({conv.get('message_count', 0)} messages)", icon=":material/description:"):
                 render_conversation_details(conv, i)
     else:
-        st.info("No conversations stored yet. Start chatting and save your conversations!")
+        st.info("No conversations stored yet. Start chatting and save your conversations.", icon=":material/info:")
 
 
 def render_conversation_details(conv, index):
@@ -1791,7 +1772,7 @@ def render_conversation_details(conv, index):
             st.write(f"**Last Message:** {last_msg}")
     
     with col2:
-        if st.button("📂 Load", key=f"load_detailed_{index}"):
+        if st.button("Load", key=f"load_detailed_{index}", icon=":material/folder_open:"):
             st.session_state.thread_id = conv['thread_id']
             st.session_state.chat_history = []
             # Load conversation messages from database
@@ -1801,14 +1782,14 @@ def render_conversation_details(conv, index):
                     if loaded_messages:
                         st.session_state.chat_history = loaded_messages
                 except Exception as e:
-                    st.warning(f"Could not load conversation history: {str(e)}")
-            st.success(f"Loaded: {conv['thread_id']}")
+                    st.warning(f"Could not load conversation history: {str(e)}", icon=":material/warning:")
+            st.success(f"Loaded: {conv['thread_id']}", icon=":material/check_circle:")
             st.rerun()
         
-        if st.button("📤 Export", key=f"export_detailed_{index}"):
+        if st.button("Export", key=f"export_detailed_{index}", icon=":material/upload:"):
             export_conversation(conv['thread_id'], index)
         
-        if st.button("🗑️ Delete", key=f"delete_detailed_{index}"):
+        if st.button("Delete", key=f"delete_detailed_{index}", icon=":material/delete:"):
             delete_conversation(conv['thread_id'])
 
 
@@ -1818,10 +1799,11 @@ def export_conversation(thread_id, index):
     if export_data:
         json_str, filename = create_download_data(export_data, f"conversation_{thread_id}")
         st.download_button(
-            label="📁 Download",
+            label="Download",
             data=json_str,
             file_name=filename,
             mime="application/json",
+            icon=":material/download:",
             key=f"download_detailed_{index}"
         )
 
@@ -1838,7 +1820,7 @@ def delete_conversation(thread_id):
 def render_memory_actions_section():
     """Render memory actions section."""
     if st.session_state.get('memory_enabled', False):
-        st.subheader("Memory Actions")
+        st.subheader("Memory actions")
         
         col1, col2, col3, col4 = st.columns(4)
         
@@ -1857,32 +1839,32 @@ def render_memory_actions_section():
 
 def render_clear_thread_action():
     """Render clear current thread action."""
-    if st.button("🗑️ Clear Current Thread", type="primary"):
+    if st.button("Clear current thread", type="primary", icon=":material/delete:"):
         st.session_state.chat_history = []
         if hasattr(st.session_state, 'checkpointer') and st.session_state.checkpointer:
             try:
                 thread_id = st.session_state.get('thread_id', 'default')
-                st.success(f"Cleared memory for thread: {thread_id}")
+                st.success(f"Cleared memory for thread: {thread_id}", icon=":material/check_circle:")
             except Exception as e:
-                st.error(f"Error clearing memory: {str(e)}")
+                st.error(f"Error clearing memory: {str(e)}", icon=":material/error:")
         else:
-            st.success("Chat history cleared!")
+            st.success("Chat history cleared", icon=":material/check_circle:")
         st.rerun()
 
 
 def render_reset_memory_action():
     """Render reset all memory action."""
-    if st.button("🔄 Reset All Memory"):
+    if st.button("Reset all memory", icon=":material/sync:"):
         st.session_state.chat_history = []
         st.session_state.checkpointer = None
         st.session_state.agent = None
-        st.success("All memory reset! Please reconnect to MCP server.")
+        st.success("All memory reset. Please reconnect to MCP server.", icon=":material/check_circle:")
         st.rerun()
 
 
 def render_export_current_action():
     """Render export current conversation action."""
-    if st.button("💾 Export Current"):
+    if st.button("Export current", icon=":material/save:"):
         if st.session_state.chat_history:
             memory_export = format_chat_history_for_export(st.session_state.chat_history)
             memory_export.update({
@@ -1896,18 +1878,19 @@ def render_export_current_action():
             
             json_str, filename = create_download_data(memory_export, f"memory_export_{st.session_state.get('thread_id', 'default')}")
             st.download_button(
-                label="📁 Download",
+                label="Download",
                 data=json_str,
                 file_name=filename,
-                mime="application/json"
+                mime="application/json",
+                icon=":material/download:",
             )
         else:
-            st.warning("No chat history to export")
+            st.warning("No chat history to export", icon=":material/warning:")
 
 
 def render_import_memory_action():
     """Render import memory action."""
-    uploaded_file = st.file_uploader("📁 Import Memory", type=['json'], key="memory_import_uploader")
+    uploaded_file = st.file_uploader("Import memory", type=['json'], key="memory_import_uploader")
     
     if uploaded_file is not None:
         try:
@@ -1921,7 +1904,7 @@ def render_import_memory_action():
                 format_version = memory_data.get('format_version', 'Unknown')
                 
                 # Show preview information
-                st.info(f"📋 **Memory File Preview:**")
+                st.write(":material/assignment: **Memory file preview:**")
                 col1, col2 = st.columns(2)
                 with col1:
                     st.write(f"• **Messages:** {len(messages)}")
@@ -1932,15 +1915,15 @@ def render_import_memory_action():
                 
                 # Show first few messages as preview
                 if len(messages) > 0:
-                    with st.expander("📝 Preview First Few Messages"):
+                    with st.expander("Preview first few messages", icon=":material/edit_note:"):
                         for i, msg in enumerate(messages[:3]):
-                            role_icon = "👤" if msg.get('role') == 'user' else "🤖"
+                            role_icon = ":material/person:" if msg.get('role') == 'user' else ":material/smart_toy:"
                             content_preview = str(msg.get('content', ''))[:100] + "..." if len(str(msg.get('content', ''))) > 100 else str(msg.get('content', ''))
                             st.write(f"**{role_icon} {msg.get('role', 'unknown').title()}:** {content_preview}")
                             
                             # Show tool executions if present
                             if msg.get('tool_executions'):
-                                st.write(f"   🔧 {len(msg['tool_executions'])} tool execution(s)")
+                                st.write(f"   :material/handyman: {len(msg['tool_executions'])} tool execution(s)")
                         
                         if len(messages) > 3:
                             st.write(f"... and {len(messages) - 3} more messages")
@@ -1948,12 +1931,12 @@ def render_import_memory_action():
                 # Warning about current chat history
                 current_history_count = len(st.session_state.get('chat_history', []))
                 if current_history_count > 0:
-                    st.warning(f"⚠️ This will replace your current chat history ({current_history_count} messages)")
+                    st.warning(f"This will replace your current chat history ({current_history_count} messages)", icon=":material/warning:")
                 
                 # Confirmation buttons
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.button("✅ Confirm Import", type="primary", key="confirm_import_btn"):
+                    if st.button("Confirm import", type="primary", key="confirm_import_btn", icon=":material/check_circle:"):
                         # Actually perform the import
                         st.session_state.chat_history = messages
                         
@@ -1980,43 +1963,43 @@ def render_import_memory_action():
                             try:
                                 checkpointer_sync_success = simple_sync_imported_messages_to_checkpointer(messages, thread_id)
                             except Exception as e:
-                                st.warning(f"⚠️ Could not sync messages to agent memory: {str(e)}")
+                                st.warning(f"Could not sync messages to agent memory: {str(e)}", icon=":material/warning:")
                         
                         if checkpointer_sync_success:
-                            st.success(f"✅ Successfully imported {len(messages)} messages and synced to agent memory!")
+                            st.success(f"Successfully imported {len(messages)} messages and synced to agent memory", icon=":material/check_circle:")
                         else:
-                            st.success(f"✅ Successfully imported {len(messages)} messages!")
+                            st.success(f"Successfully imported {len(messages)} messages", icon=":material/check_circle:")
                             if st.session_state.get('memory_enabled', False):
-                                st.info("ℹ️ Messages imported to chat interface. Start a conversation to populate agent memory.")
+                                st.info("Messages imported to chat interface. Start a conversation to populate agent memory.", icon=":material/info:")
                         
                         st.rerun()
                 
                 with col2:
-                    if st.button("❌ Cancel", key="cancel_import_btn"):
-                        st.info("Import cancelled")
+                    if st.button("Cancel", key="cancel_import_btn", icon=":material/cancel:"):
+                        st.info("Import cancelled", icon=":material/info:")
                         st.rerun()
                         
             else:
-                st.error("❌ Invalid memory export file - no 'messages' field found")
-                st.info("💡 This app only supports the current enhanced memory format (v3.0+)")
+                st.error("Invalid memory export file - no 'messages' field found", icon=":material/error:")
+                st.info("This app only supports the current enhanced memory format (v3.0+)", icon=":material/tips_and_updates:")
                 
         except json.JSONDecodeError:
-            st.error("❌ Invalid JSON file")
+            st.error("Invalid JSON file", icon=":material/error:")
         except Exception as e:
-            st.error(f"❌ Error reading memory file: {str(e)}")
+            st.error(f"Error reading memory file: {str(e)}", icon=":material/error:")
     else:
-        st.info("Select a memory export file (.json) to preview and import")
+        st.info("Select a memory export file (.json) to preview and import", icon=":material/info:")
 
 
 def render_conversation_history_section():
     """Render conversation history viewer section."""
-    st.subheader("Conversation History")
+    st.subheader("Conversation history")
     
     if st.session_state.get('chat_history'):
         render_filtered_history()
         render_memory_statistics()
     else:
-        st.info("No conversation history available. Start chatting to see memory content!")
+        st.info("No conversation history available. Start chatting to see memory content.", icon=":material/info:")
 
 
 def render_history_filters():
@@ -2024,11 +2007,11 @@ def render_history_filters():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        show_user = st.checkbox("Show User Messages", value=True, key="memory_filter_user")
+        show_user = st.checkbox("Show user messages", value=True, key="memory_filter_user")
     with col2:
-        show_assistant = st.checkbox("Show Assistant Messages", value=True, key="memory_filter_assistant")
+        show_assistant = st.checkbox("Show assistant messages", value=True, key="memory_filter_assistant")
     with col3:
-        show_tools = st.checkbox("Show Tool Executions", value=False, key="memory_filter_tools")
+        show_tools = st.checkbox("Show tool executions", value=False, key="memory_filter_tools")
     
     return show_user, show_assistant, show_tools
 
@@ -2040,14 +2023,14 @@ def render_filtered_history():
     with st.container():
         for i, message in enumerate(st.session_state.chat_history):
             if message["role"] == "user" and show_user:
-                with st.expander(f"👤 User Message #{i+1}"):
+                with st.expander(f"User message #{i+1}", icon=":material/person:"):
                     st.write(message["content"])
                     
             elif message["role"] == "assistant" and show_assistant:
-                with st.expander(f"🤖 Assistant Message #{i+1}"):
+                with st.expander(f"Assistant message #{i+1}", icon=":material/smart_toy:"):
                     st.write(message["content"])
                     if show_tools and message.get("tool_executions"):
-                        st.write("**Tool Executions:**")
+                        st.write("**Tool executions:**")
                         for j, exec_info in enumerate(message["tool_executions"]):
                             st.write(f"• **{exec_info.get('tool_name', 'Unknown')}** at {exec_info.get('timestamp', 'Unknown time')}")
                             if exec_info.get("input"):
@@ -2066,23 +2049,23 @@ def render_filtered_history():
 
 def render_memory_statistics():
     """Render memory statistics."""
-    st.subheader("Memory Statistics")
+    st.subheader("Memory statistics")
     
     stats = calculate_chat_statistics(st.session_state.chat_history)
     
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("User Messages", stats['user_messages'])
-        st.metric("Assistant Messages", stats['assistant_messages'])
+        st.metric("User messages", stats['user_messages'])
+        st.metric("Assistant messages", stats['assistant_messages'])
     with col2:
-        st.metric("Tool Executions", stats['tool_executions'])
-        st.metric("Messages with Reasoning", stats['messages_with_reasoning'])
+        st.metric("Tool executions", stats['tool_executions'])
+        st.metric("Messages with reasoning", stats['messages_with_reasoning'])
     with col3:
-        st.metric("Est. Content Tokens", f"{stats['estimated_tokens']:,}")
-        st.metric("Est. Thinking Tokens", f"{stats['estimated_thinking_tokens']:,}")
+        st.metric("Est. content tokens", f"{stats['estimated_tokens']:,}")
+        st.metric("Est. thinking tokens", f"{stats['estimated_thinking_tokens']:,}")
     with col4:
-        st.metric("Total Words", f"{stats['total_words']:,}")
+        st.metric("Total words", f"{stats['total_words']:,}")
         if stats['assistant_messages'] > 0:
             st.metric("Reasoning %", f"{stats['reasoning_percentage']:.1f}%")
         else:
@@ -2091,7 +2074,7 @@ def render_memory_statistics():
 
 def render_memory_tips():
     """Render memory tips section."""
-    with st.expander("💡 Memory Tips"):
+    with st.expander("Memory tips", icon=":material/tips_and_updates:"):
         st.markdown("""
         **Memory Types:**
         - **Short-term**: Remembers conversation only within current browser session
@@ -2117,86 +2100,92 @@ def render_memory_tips():
 def render_about_tab():
     """Render the about tab."""
     # Header with logo and quick facts
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        st.image("logo_transparent.png", width=160)
-    with c2:
-        st.subheader("LangChain MCP Client")
-        # Version and environment
-        app_version = "dev"
-        try:
-            from importlib.metadata import version as _pkg_version
+    with st.container(border=True):
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            st.image("logo_transparent.png", width=160)
+        with c2:
+            st.subheader("LangChain MCP Client")
+            # Version and environment
+            app_version = "dev"
             try:
-                app_version = _pkg_version("langchain-mcp-client")
+                from importlib.metadata import version as _pkg_version
+                try:
+                    app_version = _pkg_version("langchain-mcp-client")
+                except Exception:
+                    # Fallback to pyproject parsing
+                    import tomllib
+                    with open("pyproject.toml", "rb") as _f:
+                        data = tomllib.load(_f)
+                        app_version = data.get("project", {}).get("version", app_version)
             except Exception:
-                # Fallback to pyproject parsing
-                import tomllib
-                with open("pyproject.toml", "rb") as _f:
-                    data = tomllib.load(_f)
-                    app_version = data.get("project", {}).get("version", app_version)
-        except Exception:
-            pass
-        st.caption(f"Version: {app_version}")
-        # Quick badges
-        providers = get_available_providers()
-        with st.container(horizontal=True):
-            for p in providers:
-                st.badge(f"{p}", color="green")
+                pass
+            st.caption(f"Version: {app_version}")
+            # Quick badges
+            providers = get_available_providers()
+            with st.container(horizontal=True):
+                for p in providers:
+                    st.badge(f"{p}", color="green")
 
-        st.markdown("**Developer**")
-        with st.container(horizontal=True):
-            st.link_button("LinkedIn", "https://www.linkedin.com/in/guinacio/")
-            st.link_button("GitHub", "https://github.com/guinacio")
+            st.markdown("**Developer**")
+            with st.container(horizontal=True):
+                st.link_button("LinkedIn", "https://www.linkedin.com/in/guinacio/")
+                st.link_button("GitHub", "https://github.com/guinacio")
 
     # Tabs for structured info
     t_overview, t_getting_started, t_links, t_system, t_license = st.tabs([
-        "Overview", "Getting Started", "Links", "System", "License"
+        "Overview", "Getting started", "Links", "System", "License"
     ])
 
     with t_overview:
-        st.markdown("""
-        **What is this?**
-        - A Streamlit app to interact with MCP servers via LangChain tools and agents.
-        - Supports multiple LLM providers and streaming.
-        - Memory support with session or persistent storage.
-        """)
-        with st.popover("What's new"):
-            st.markdown("- Chat attachments (PDF/TXT/images)\n- Improved Test Tools UI with search, presets, and tabs\n- Streaming with reasoning visualization")
+        with st.container(border=True):
+            st.markdown("""
+            **What is this?**
+            - A Streamlit app to interact with MCP servers via LangChain tools and agents.
+            - Supports multiple LLM providers and streaming.
+            - Memory support with session or persistent storage.
+            """)
+            with st.popover("What's new"):
+                st.markdown("- Chat attachments (PDF/TXT/images)\n- Improved Test Tools UI with search, presets, and tabs\n- Streaming with reasoning visualization")
 
-        f1, f2, f3 = st.columns(3)
-        with f1:
-            st.metric("Providers", len(providers))
-        with f2:
-            st.metric("Tools Connected", len(st.session_state.get("tools", [])))
-        with f3:
-            st.metric("Sessions", len(st.session_state.get("chat_history", [])))
+            f1, f2, f3 = st.columns(3)
+            with f1:
+                st.metric("Providers", len(providers), border=True)
+            with f2:
+                st.metric("Tools connected", len(st.session_state.get("tools", [])), border=True)
+            with f3:
+                st.metric("Sessions", len(st.session_state.get("chat_history", [])), border=True)
 
     with t_getting_started:
-        st.markdown("""
-        1. Configure your LLM provider and model in the sidebar.
-        2. Connect to one or more MCP servers (or use Chat-only mode).
-        3. Chat in the Chat tab or test individual tools in Test Tools.
-        4. Optionally enable Memory and set a Thread ID to persist conversations.
-        """)
-        st.info("Tip: Use the Test Tools tab to dry-run tools and save parameter presets.")
+        with st.container(border=True):
+            st.markdown("""
+            1. Configure your LLM provider and model in the sidebar.
+            2. Connect to one or more MCP servers (or use Chat-only mode).
+            3. Chat in the Chat tab or test individual tools in Test tools.
+            4. Optionally enable Memory and set a Thread ID to persist conversations.
+            """)
+            st.info("Tip: Use the Test tools tab to dry-run tools and save parameter presets.", icon=":material/tips_and_updates:")
 
     with t_links:
-        st.markdown("""
-        - [LangChain Documentation](https://python.langchain.com/docs/)
-        - [LangGraph Documentation](https://langchain-ai.github.io/langgraph/)
-        - [MCP (Model Context Protocol)](https://modelcontextprotocol.io/introduction)
-        - [LangChain MCP Adapters](https://github.com/langchain-ai/langchain-mcp-adapters)
-        """)
+        with st.container(border=True):
+            st.markdown("""
+            - [LangChain Documentation](https://python.langchain.com/docs/)
+            - [LangGraph Documentation](https://langchain-ai.github.io/langgraph/)
+            - [MCP (Model Context Protocol)](https://modelcontextprotocol.io/introduction)
+            - [LangChain MCP Adapters](https://github.com/langchain-ai/langchain-mcp-adapters)
+            """)
 
     with t_system:
-        info = get_system_info()
-        st.json(info)
-        st.caption("Environment info is captured at runtime for troubleshooting.")
+        with st.container(border=True):
+            info = get_system_info()
+            st.json(info)
+            st.caption("Environment info is captured at runtime for troubleshooting.")
 
     with t_license:
-        st.markdown("""
-        This project is licensed under the **MIT License**. See the `LICENSE` file for details.
-        """)
+        with st.container(border=True):
+            st.markdown("""
+            This project is licensed under the **MIT License**. See the `LICENSE` file for details.
+            """)
 
 
 def display_tool_executions():
@@ -2233,12 +2222,12 @@ def display_tool_executions():
                     st.code(str(output), language="text")
                 
                 st.write(f"**Time:** {exec_record['timestamp']}")
-                st.divider()
 
 
 def render_config_tab():
     """Render the configuration tab for system prompts and model parameters."""
-    st.header("🔧 Configuration")
+    st.header("Configuration")
+    st.caption("Control prompts, model parameters, validation, and reusable presets.")
     
     # Initialize config in session state if not exists
     if 'config_system_prompt' not in st.session_state:
@@ -2253,18 +2242,19 @@ def render_config_tab():
         st.session_state.config_use_custom_settings = False
     
     # Configuration sections
-    render_config_overview()
-    st.divider()
-    render_system_prompt_section()
-    st.divider()
-    render_model_parameters_section()
-    st.divider()
-    render_config_management_section()
+    with st.container(border=True):
+        render_config_overview()
+    with st.container(border=True):
+        render_system_prompt_section()
+    with st.container(border=True):
+        render_model_parameters_section()
+    with st.container(border=True):
+        render_config_management_section()
 
 
 def render_config_overview():
     """Render configuration overview."""
-    st.subheader("Configuration Overview")
+    st.subheader("Configuration overview")
     
     current_provider = st.session_state.get('llm_provider', 'Not Selected')
     current_model = st.session_state.get('selected_model', 'Not Selected')
@@ -2272,19 +2262,19 @@ def render_config_overview():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.metric("Current Provider", current_provider)
+        st.metric("Current provider", current_provider)
     with col2:
-        st.metric("Current Model", current_model)
+        st.metric("Current model", current_model)
     with col3:
         use_custom = st.session_state.get('config_use_custom_settings', False)
-        st.metric("Custom Config", "Enabled" if use_custom else "Disabled")
+        st.metric("Custom config", "Enabled" if use_custom else "Disabled")
     
     # Configuration status and apply button
     render_config_status_and_apply()
     
     # Provider capability overview
     if current_provider != 'Not Selected':
-        with st.expander("Provider Capabilities"):
+        with st.expander("Provider capabilities"):
             capabilities = get_provider_capabilities(current_provider)
             render_provider_capabilities(capabilities)
 
@@ -2299,20 +2289,21 @@ def render_config_status_and_apply():
     with col1:
         if agent_exists:
             if st.session_state.get('config_applied', False) and not config_changed:
-                st.success("✅ Current configuration is applied to the agent")
+                st.success("Current configuration is applied to the agent", icon=":material/check_circle:")
             elif config_changed:
-                st.warning("⚠️ Configuration changed - click 'Apply Configuration' to update the agent")
+                st.warning("Configuration changed - click 'Apply configuration' to update the agent", icon=":material/warning:")
             else:
-                st.info("ℹ️ Agent is using default configuration")
+                st.info("Agent is using default configuration", icon=":material/info:")
         else:
-            st.info("ℹ️ No agent connected - connect to MCP server or start chat-only mode first")
+            st.info("No agent connected - connect to MCP server or start chat-only mode first", icon=":material/info:")
     
     with col2:
         apply_disabled = not agent_exists or (not config_changed and st.session_state.get('config_applied', False))
         
         if st.button(
-            "🔄 Apply Configuration", 
+            "Apply configuration",
             type="primary",
+            icon=":material/sync:",
             disabled=apply_disabled,
             help="Apply current configuration settings to the agent"
         ):
@@ -2369,7 +2360,7 @@ def apply_configuration_to_agent():
             # We need to get the API key from the current agent or ask user to reconnect
             # For Ollama, we don't need an API key
             if not llm_config["api_key"] and llm_config["provider"] != "Ollama" and st.session_state.get('agent'):
-                st.warning("⚠️ Cannot apply configuration - API key not available. Please reconnect to MCP server or restart chat-only mode with your new configuration.")
+                st.warning("Cannot apply configuration - API key not available. Please reconnect to MCP server or restart chat-only mode with your new configuration.", icon=":material/warning:")
                 return
             
             # Recreate agent with new configuration
@@ -2382,27 +2373,27 @@ def apply_configuration_to_agent():
                 
                 config_summary = []
                 if st.session_state.get('config_use_custom_settings', False):
-                    config_summary.append("✅ Custom system prompt applied")
-                    config_summary.append(f"✅ Temperature: {st.session_state.get('config_temperature', 0.7)}")
+                    config_summary.append(":material/check_circle: Custom system prompt applied")
+                    config_summary.append(f":material/check_circle: Temperature: {st.session_state.get('config_temperature', 0.7)}")
                     if st.session_state.get('config_max_tokens'):
-                        config_summary.append(f"✅ Max tokens: {st.session_state.get('config_max_tokens')}")
+                        config_summary.append(f":material/check_circle: Max tokens: {st.session_state.get('config_max_tokens')}")
                     if st.session_state.get('config_timeout'):
-                        config_summary.append(f"✅ Timeout: {st.session_state.get('config_timeout')}s")
+                        config_summary.append(f":material/check_circle: Timeout: {st.session_state.get('config_timeout')}s")
                 else:
-                    config_summary.append("✅ Default configuration applied")
+                    config_summary.append(":material/check_circle: Default configuration applied")
                 
-                st.success("🎉 Configuration successfully applied to agent!")
-                with st.expander("📋 Applied Settings"):
+                st.success("Configuration successfully applied to agent", icon=":material/celebration:")
+                with st.expander("Applied settings", icon=":material/assignment:"):
                     for item in config_summary:
                         st.write(item)
                 
                 st.rerun()
             else:
-                st.error("❌ Failed to apply configuration. Please check your settings and try again.")
+                st.error("Failed to apply configuration. Please check your settings and try again.", icon=":material/error:")
                 
     except Exception as e:
-        st.error(f"❌ Error applying configuration: {str(e)}")
-        st.info("💡 Tip: Try reconnecting to your MCP server or restarting chat-only mode to apply the new configuration.")
+        st.error(f"Error applying configuration: {str(e)}", icon=":material/error:")
+        st.info("Tip: Try reconnecting to your MCP server or restarting chat-only mode to apply the new configuration.", icon=":material/tips_and_updates:")
 
 
 def get_provider_capabilities(provider: str) -> Dict:
@@ -2414,13 +2405,13 @@ def get_provider_capabilities(provider: str) -> Dict:
     
     config = LLM_PROVIDERS[provider]
     return {
-        "System Prompt Support": "✅" if config.get("supports_system_prompt", False) else "❌",
+        "System Prompt Support": ":material/check_circle:" if config.get("supports_system_prompt", False) else ":material/error:",
         "Temperature Range": f"{config.get('temperature_range', (0.0, 1.0))[0]} - {config.get('temperature_range', (0.0, 1.0))[1]}",
         "Max Tokens Range": f"{config.get('max_tokens_range', (1, 4096))[0]:,} - {config.get('max_tokens_range', (1, 4096))[1]:,}",
         "Default Temperature": str(config.get('default_temperature', 0.7)),
         "Default Max Tokens": f"{config.get('default_max_tokens', 4096):,}",
         "Default Timeout": f"{config.get('default_timeout', 600.0)}s",
-        "API Key Required": "✅" if config.get("requires_api_key", True) else "❌"
+        "API Key Required": ":material/check_circle:" if config.get("requires_api_key", True) else ":material/error:"
     }
 
 
@@ -2436,14 +2427,14 @@ def render_provider_capabilities(capabilities: Dict):
 
 def render_system_prompt_section():
     """Render system prompt configuration section."""
-    st.subheader("System Prompt Configuration")
+    st.subheader("System prompt configuration")
     
     current_provider = st.session_state.get('llm_provider', '')
     
     if current_provider and supports_system_prompt(current_provider):
         # Enable/disable custom configuration
         use_custom = st.checkbox(
-            "Use Custom Configuration",
+            "Use custom configuration",
             value=st.session_state.get('config_use_custom_settings', False),
             help="Enable to customize system prompt and model parameters",
             key="config_use_custom_checkbox"
@@ -2463,15 +2454,15 @@ def render_system_prompt_section():
             st.session_state.config_system_prompt = system_prompt
             
             # Preset system prompts
-            with st.expander("📋 System Prompt Presets"):
+            with st.expander("System prompt presets", icon=":material/assignment:"):
                 render_system_prompt_presets()
         else:
-            st.info("Custom configuration is disabled. The agent will use default settings.")
+            st.info("Custom configuration is disabled. The agent will use default settings.", icon=":material/info:")
     else:
         if current_provider:
-            st.warning(f"⚠️ {current_provider} does not support system prompts")
+            st.warning(f"{current_provider} does not support system prompts", icon=":material/warning:")
         else:
-            st.info("Please select an LLM provider in the sidebar to configure system prompts")
+            st.info("Please select an LLM provider in the sidebar to configure system prompts", icon=":material/info:")
 
 
 def render_system_prompt_presets():
@@ -2541,7 +2532,7 @@ Be strategic, analytical, and results-oriented in your responses."""
         key="config_preset_selector"
     )
     
-    if st.button("Apply Preset", key="config_apply_preset"):
+    if st.button("Apply preset", key="config_apply_preset"):
         st.session_state.config_system_prompt = presets[selected_preset]
         st.success(f"Applied '{selected_preset}' preset!")
         st.rerun()
@@ -2549,7 +2540,7 @@ Be strategic, analytical, and results-oriented in your responses."""
 
 def render_model_parameters_section():
     """Render model parameters configuration section."""
-    st.subheader("Model Parameters")
+    st.subheader("Model parameters")
     
     current_provider = st.session_state.get('llm_provider', '')
     use_custom = st.session_state.get('config_use_custom_settings', False)
@@ -2566,9 +2557,9 @@ def render_model_parameters_section():
             render_parameter_validation()
     else:
         if not current_provider:
-            st.info("Please select an LLM provider in the sidebar to configure parameters")
+            st.info("Please select an LLM provider in the sidebar to configure parameters", icon=":material/info:")
         else:
-            st.info("Enable 'Use Custom Configuration' to adjust model parameters")
+            st.info("Enable 'Use custom configuration' to adjust model parameters", icon=":material/info:")
 
 
 def render_temperature_config(provider: str):
@@ -2594,7 +2585,7 @@ def render_max_tokens_config(provider: str):
     default_tokens = get_default_max_tokens(provider)
     
     enable_max_tokens = st.checkbox(
-        "Limit Max Tokens",
+        "Limit max tokens",
         value=st.session_state.get('config_max_tokens') is not None,
         help="Limit the maximum number of tokens in the response",
         key="config_enable_max_tokens"
@@ -2602,7 +2593,7 @@ def render_max_tokens_config(provider: str):
     
     if enable_max_tokens:
         max_tokens = st.number_input(
-            "Max Tokens",
+            "Max tokens",
             min_value=token_min,
             max_value=token_max,
             value=st.session_state.get('config_max_tokens', default_tokens),
@@ -2620,7 +2611,7 @@ def render_timeout_config(provider: str):
     default_timeout = get_default_timeout(provider)
     
     enable_timeout = st.checkbox(
-        "Custom Timeout",
+        "Custom timeout",
         value=st.session_state.get('config_timeout') is not None,
         help="Set a custom timeout for API requests",
         key="config_enable_timeout"
@@ -2657,12 +2648,12 @@ def render_parameter_validation():
         )
         
         if is_valid:
-            st.success("✅ Configuration is valid")
+            st.success("Configuration is valid", icon=":material/check_circle:")
         else:
-            st.error(f"❌ {error_msg}")
+            st.error(f"{error_msg}", icon=":material/error:")
         
         # Configuration preview
-        with st.expander("👀 Configuration Preview"):
+        with st.expander("Configuration preview", icon=":material/visibility:"):
             config_preview = {
                 "provider": current_provider,
                 "model": st.session_state.get('selected_model', 'Not selected'),
@@ -2676,7 +2667,7 @@ def render_parameter_validation():
 
 def render_config_management_section():
     """Render configuration management section."""
-    st.subheader("Configuration Management")
+    st.subheader("Configuration management")
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -2693,19 +2684,19 @@ def render_config_management_section():
         render_export_config_action()
     
     # Debug options
-    with st.expander("🔧 Debug Options"):
+    with st.expander("Debug options", icon=":material/handyman:"):
         debug_system_prompt = st.checkbox(
-            "Debug System Prompt",
+            "Debug system prompt",
             value=st.session_state.get('debug_system_prompt', False),
             help="Enable debug logging for system prompt troubleshooting"
         )
         st.session_state.debug_system_prompt = debug_system_prompt
         
         if debug_system_prompt:
-            st.info("🔧 Debug mode enabled. System prompt modifier calls will be logged in the chat interface.")
+            st.info("Debug mode enabled. System prompt modifier calls will be logged in the chat interface.", icon=":material/handyman:")
         
         # Additional debug info
-        if st.button("📊 Show Debug Info"):
+        if st.button("Show debug info", icon=":material/analytics:"):
             debug_info = {
                 "session_state_keys": list(st.session_state.keys()),
                 "agent_exists": st.session_state.get('agent') is not None,
@@ -2718,7 +2709,7 @@ def render_config_management_section():
 
 def render_save_config_action():
     """Render save configuration action."""
-    if st.button("💾 Save Config", help="Save current configuration"):
+    if st.button("Save config", help="Save current configuration", icon=":material/save:"):
         config_name = st.session_state.get('config_name', f"config_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}")
         
         config_data = {
@@ -2749,7 +2740,7 @@ def render_load_config_action():
             key="config_load_selector"
         )
         
-        if st.button("📂 Load", help="Load selected configuration"):
+        if st.button("Load", help="Load selected configuration", icon=":material/folder_open:"):
             if selected_config in st.session_state.saved_configs:
                 config_data = st.session_state.saved_configs[selected_config]
                 
@@ -2762,12 +2753,12 @@ def render_load_config_action():
                 st.success(f"Loaded configuration '{selected_config}'")
                 st.rerun()
     else:
-        st.info("No saved configurations available")
+        st.caption("No saved configurations available")
 
 
 def render_reset_config_action():
     """Render reset configuration action."""
-    if st.button("🔄 Reset to Defaults", help="Reset all settings to defaults"):
+    if st.button("Reset to defaults", help="Reset all settings to defaults", icon=":material/sync:"):
         st.session_state.config_system_prompt = DEFAULT_SYSTEM_PROMPT
         st.session_state.config_temperature = 0.7
         st.session_state.config_max_tokens = None
@@ -2779,7 +2770,7 @@ def render_reset_config_action():
 
 def render_export_config_action():
     """Render export configuration action."""
-    if st.button("📤 Export Config", help="Export configuration as JSON"):
+    if st.button("Export config", help="Export configuration as JSON", icon=":material/upload:"):
         config_data = {
             'system_prompt': st.session_state.get('config_system_prompt', ''),
             'temperature': st.session_state.get('config_temperature', 0.7),
@@ -2791,8 +2782,9 @@ def render_export_config_action():
         
         json_str, filename = create_download_data(config_data, "agent_config")
         st.download_button(
-            label="📁 Download Config",
+            label="Download config",
             data=json_str,
             file_name=filename,
-            mime="application/json"
+            mime="application/json",
+            icon=":material/download:",
         )

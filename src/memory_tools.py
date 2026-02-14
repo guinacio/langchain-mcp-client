@@ -344,10 +344,10 @@ class ConversationHistoryTool(BaseTool):
         total_messages = len(messages)
         date_range = self._get_date_range(messages)
         
-        formatted_history.append(f"📋 Conversation History ({total_messages} message{'s' if total_messages != 1 else ''})")
+        formatted_history.append(f":material/assignment: Conversation history ({total_messages} message{'s' if total_messages != 1 else ''})")
         if date_range:
-            formatted_history.append(f"📅 Date Range: {date_range}")
-        formatted_history.append(f"🔄 Sort Order: {sort_order.replace('_', ' ').title()}")
+            formatted_history.append(f":material/date_range: Date range: {date_range}")
+        formatted_history.append(f":material/sync: Sort order: {sort_order.replace('_', ' ').title()}")
         formatted_history.append("")
         
         # Messages
@@ -368,11 +368,11 @@ class ConversationHistoryTool(BaseTool):
             
             # Add tool execution information if available
             if msg.get("tool_executions"):
-                formatted_history.append("   🔧 Tools used:")
+                formatted_history.append("   :material/handyman: Tools used:")
                 for tool_exec in msg.get("tool_executions", []):
                     tool_name = tool_exec.get("tool_name", "Unknown")
                     tool_time = tool_exec.get("timestamp", "Unknown time")
-                    formatted_history.append(f"      • {tool_name} (executed at {tool_time})")
+                    formatted_history.append(f"      - {tool_name} (executed at {tool_time})")
                     
                     # Show brief input/output if available
                     if tool_exec.get("input"):

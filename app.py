@@ -47,11 +47,11 @@ def main():
 
     # Create main tabs
     tab_chat, tab_test, tab_memory, tab_config, tab_about = st.tabs([
-        "🗨️ Chat", 
-        "🔧 Test Tools", 
-        "🧠 Memory", 
-        "⚙️ Config",
-        "ℹ️ About"
+        ":material/chat: Chat",
+        ":material/handyman: Test tools",
+        ":material/psychology: Memory",
+        ":material/settings: Config",
+        ":material/info: About",
     ])
 
     # Render tab content

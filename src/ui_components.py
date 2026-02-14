@@ -150,31 +150,27 @@ def render_sidebar():
     """Render the main application sidebar with all configuration options."""
     with st.sidebar:
         st.title("LangChain MCP Client")
-        st.divider()
-        st.header("Configuration")
-        
-        # LLM Provider configuration
-        llm_config = render_llm_configuration()
-        
-        # Streaming configuration
-        render_streaming_configuration(llm_config)
-        
-        # Memory configuration
-        memory_config = render_memory_configuration()
-        
-        # MCP Server configuration
-        render_server_configuration(llm_config, memory_config)
-        
-        st.divider()
-        
-        # Display available tools
-        render_available_tools()
+        st.caption("Configure model, memory, and MCP connections.")
+
+        with st.container(border=True):
+            st.subheader("Model")
+            llm_config = render_llm_configuration()
+            render_streaming_configuration(llm_config)
+
+        with st.container(border=True):
+            memory_config = render_memory_configuration()
+
+        with st.container(border=True):
+            render_server_configuration(llm_config, memory_config)
+
+        with st.container(border=True):
+            render_available_tools()
 
 
 def render_llm_configuration() -> Dict:
     """Render LLM provider configuration section."""
     llm_provider = st.selectbox(
-        "Select LLM Provider",
+        "Select LLM provider",
         options=get_available_providers(),
         index=0,
         on_change=reset_connection_state
@@ -194,7 +190,7 @@ def render_ollama_configuration() -> Dict:
     """Render Ollama-specific configuration with dynamic model fetching."""
     # Ollama server URL configuration
     ollama_url = st.text_input(
-        "Ollama Server URL",
+        "Ollama server URL",
         value="http://localhost:11434",
         help="URL of your Ollama server (default: http://localhost:11434)"
     )
@@ -215,20 +211,20 @@ def render_ollama_configuration() -> Dict:
                     st.session_state.ollama_connected = True
                     st.session_state.ollama_models = []
                     st.session_state.ollama_url = ollama_url
-                    st.warning("⚠️ Connected but no models found. Make sure you have models installed.")
-                    st.info("💡 Install models using: `ollama pull <model-name>`")
+                    st.warning("Connected but no models found. Make sure you have models installed.", icon=":material/warning:")
+                    st.caption("Install models using: `ollama pull <model-name>`")
                 else:
                     st.session_state.ollama_connected = False
                     st.session_state.ollama_models = []
-                    st.error("❌ Failed to connect to Ollama")
-                    st.info("💡 Make sure Ollama is running: `ollama serve`")
+                    st.error("Failed to connect to Ollama", icon=":material/error:")
+                    st.caption("Make sure Ollama is running: `ollama serve`")
     
     with col2:
         # Show connection status
         if st.session_state.get('ollama_connected', False):
-            st.badge("Connected", icon="🟢", color="green")
+            st.badge("Connected", icon=":material/check_circle:", color="green")
         else:
-            st.badge("Not Connected", icon="🔴", color="red")
+            st.badge("Not connected", icon=":material/error:", color="red")
     
     # Model selection
     if st.session_state.get('ollama_connected', False):
@@ -239,19 +235,19 @@ def render_ollama_configuration() -> Dict:
             # Show available models            
             st.write(f"**Available Models:** :blue-badge[{model_count} models available]")
             model_name = st.selectbox(
-                "Select Model",
+                "Select model",
                 options=available_models,
                 index=0,
                 key="ollama_model_selector"
             )
             
         else:
-            st.warning("⚠️ No models found on Ollama server")
-            st.info("Install models using: `ollama pull <model-name>`")
+            st.warning("No models found on Ollama server", icon=":material/warning:")
+            st.caption("Install models using: `ollama pull <model-name>`")
             
             # Fallback to manual model input
             model_name = st.text_input(
-                "Manual Model Name",
+                "Manual model name",
                 placeholder="Enter model name (e.g. llama3.2, granite3.3:8b)",
                 help="Enter the exact model name if you know it exists"
             )
@@ -260,9 +256,9 @@ def render_ollama_configuration() -> Dict:
                 model_name = "llama3"  # Default fallback
     else:
         # Not connected - show manual input
-        st.info("Click 'Connect to Ollama' first to see available models")
+        st.caption("Click 'Connect to Ollama' first to see available models")
         model_name = st.text_input(
-            "Model Name",
+            "Model name",
             value="granite3.3:8b",
             placeholder="Enter Ollama model name",
             help="Enter the model name. Connect to see available models."
@@ -327,9 +323,9 @@ def render_standard_llm_configuration(llm_provider: str) -> Dict:
         with col2:
             if st.session_state.get(fetched_flag_key):
                 count = len(st.session_state.get(dynamic_key, []))
-                st.badge(f"Fetched {count} models", icon="🟢", color="green")
+                st.badge(f"Fetched {count} models", icon=":material/check_circle:", color="green")
             else:
-                st.badge("Not fetched", icon="🔴", color="red")
+                st.badge("Not fetched", icon=":material/error:", color="red")
             if st.session_state.get(error_key):
                 st.caption(f"Last error: {st.session_state.get(error_key)}")
 
@@ -358,7 +354,7 @@ def render_standard_llm_configuration(llm_provider: str) -> Dict:
         }.get(llm_provider, "Enter custom model name")
         
         custom_model = st.text_input(
-            "Custom Model Name",
+            "Custom model name",
             placeholder=placeholder_text,
             key=f"custom_model_{llm_provider}"
         )
@@ -369,16 +365,12 @@ def render_standard_llm_configuration(llm_provider: str) -> Dict:
     if llm_provider == "OpenAI" and is_openai_reasoning_model(model_name):
         # Check if it's an o1 series model (not supported)
         if model_name in ["o1", "o1-mini", "o1-preview"] or "o1-" in model_name.lower():
-            st.error("❌ **o1 Series Models Not Supported**: o1, o1-mini, and o1-preview models have unique API requirements that are not compatible with this application. Please use o3-mini, o4-mini, or regular GPT models instead.")
-            st.info("💡 **Recommended alternatives**: o3-mini, o4-mini, gpt-4o, or gpt-4 work great with this application!")
+            st.error("**o1 series models are not supported**: o1, o1-mini, and o1-preview models have unique API requirements that are not compatible with this application. Please use o3-mini, o4-mini, or regular GPT models instead.", icon=":material/error:")
+            st.info("**Recommended alternatives**: o3-mini, o4-mini, gpt-4o, or gpt-4 work great with this application.", icon=":material/tips_and_updates:")
         elif supports_streaming_for_reasoning_model(model_name):
-            st.warning("⚠️ **Reasoning Model Detected**: This model has special requirements - temperature is not supported. The model will use optimized parameters automatically.")
+            st.warning("**Reasoning model detected**: This model has special requirements - temperature is not supported. The model will use optimized parameters automatically.", icon=":material/warning:")
         else:
-            st.warning("⚠️ **Reasoning Model Detected**: This model has special requirements - temperature and streaming are not supported. The model will use optimized parameters automatically.")
-    
-    # Show provider-specific guidance for Google models
-    if llm_provider == "Google":
-        st.info("ℹ️ Google Gemini MCP tool calling is enabled on the latest dependency stack. If your provider account/model does not allow tools, switch to Chat-Only mode.")
+            st.warning("**Reasoning model detected**: This model has special requirements - temperature and streaming are not supported. The model will use optimized parameters automatically.", icon=":material/warning:")
     
     # Store selected model in session state for Config tab
     st.session_state.selected_model = model_name
@@ -392,36 +384,36 @@ def render_standard_llm_configuration(llm_provider: str) -> Dict:
 
 def render_streaming_configuration(llm_config: Dict) -> None:
     """Render streaming configuration options."""
-    with st.expander("🌊 Streaming Settings", expanded=False):
+    with st.expander("Streaming settings", expanded=False, icon=":material/stream:"):
         provider = llm_config.get("provider", "")
         streaming_supported = supports_streaming(provider) if provider else False
         
         if streaming_supported:
             enable_streaming = st.checkbox(
-                "Enable Streaming",
+                "Enable streaming",
                 value=st.session_state.get('enable_streaming', True),
                 help="Stream responses token by token for a more interactive experience"
             )
             st.session_state.enable_streaming = enable_streaming
             
             if enable_streaming:
-                st.markdown(":green-badge[ℹ️ Streaming enabled - responses will appear in real-time]")
+                st.caption(":material/check_circle: Streaming enabled - responses will appear in real-time")
             else:
-                st.markdown(":blue-badge[ℹ️ Streaming disabled - responses will appear all at once]")
+                st.caption(":material/info: Streaming disabled - responses will appear all at once")
         else:
             st.session_state.enable_streaming = False
             if provider:
-                st.warning(f"⚠️ {provider} doesn't support streaming")
+                st.warning(f"{provider} does not support streaming", icon=":material/warning:")
             else:
-                st.info("ℹ️ Select a provider to see streaming options")
+                st.caption("Select a provider to see streaming options")
 
 
 def render_memory_configuration() -> Dict:
     """Render memory configuration section."""
-    st.header("Memory Settings")
+    st.subheader("Memory")
     
     memory_enabled = st.checkbox(
-        "Enable Conversation Memory",
+        "Enable conversation memory",
         value=st.session_state.get('memory_enabled', False),
         help="Enable persistent conversation memory across interactions",
         key="sidebar_memory_enabled"
@@ -433,7 +425,7 @@ def render_memory_configuration() -> Dict:
     if memory_enabled:
         # Memory type selection
         memory_type = st.selectbox(
-            "Memory Type",
+            "Memory type",
             options=["Short-term (Session)", "Persistent (Cross-session)"],
             index=0 if st.session_state.get('memory_type', 'Short-term (Session)') == 'Short-term (Session)' else 1,
             help="Short-term: Remembers within current session\nPersistent: Remembers across sessions using SQLite database",
@@ -470,16 +462,16 @@ def render_memory_configuration() -> Dict:
 
 def render_persistent_storage_section():
     """Render persistent storage configuration and management."""
-    with st.expander("💾 Database Settings"):
+    with st.expander("Database settings", icon=":material/save:"):
         if hasattr(st.session_state, 'persistent_storage'):
             db_stats = st.session_state.persistent_storage.get_database_stats()
             
             col1, col2 = st.columns(2)
             with col1:
                 st.metric("Conversations", db_stats.get('conversation_count', 0))
-                st.metric("Total Messages", db_stats.get('total_messages', 0))
+                st.metric("Total messages", db_stats.get('total_messages', 0))
             with col2:
-                st.metric("Database Size", f"{db_stats.get('database_size_mb', 0)} MB")
+                st.metric("Database size", f"{db_stats.get('database_size_mb', 0)} MB")
                 st.text(f"Path: {db_stats.get('database_path', 'N/A')}")
             
             # Conversation browser
@@ -493,7 +485,7 @@ def render_conversation_browser():
     
     conversations = st.session_state.persistent_storage.list_conversations()
     if conversations:
-        st.subheader("Saved Conversations")
+        st.subheader("Saved conversations")
         for conv in conversations[:5]:  # Show last 5 conversations
             with st.container():
                 col1, col2, col3 = st.columns([3, 1, 1])
@@ -508,7 +500,7 @@ def render_conversation_browser():
                     st.caption(f"{conv.get('message_count', 0)} messages • {last_msg}")
                 
                 with col2:
-                    if st.button("📂 Load", key=f"load_{conv['thread_id']}"):
+                    if st.button("Load", key=f"load_{conv['thread_id']}", icon=":material/folder_open:"):
                         st.session_state.thread_id = conv['thread_id']
                         st.session_state.chat_history = []
                         # Load conversation messages from database
@@ -518,39 +510,37 @@ def render_conversation_browser():
                                 if loaded_messages:
                                     st.session_state.chat_history = loaded_messages
                             except Exception as e:
-                                st.warning(f"Could not load conversation history: {str(e)}")
-                        st.success(f"Loaded conversation: {conv['thread_id']}")
+                                st.warning(f"Could not load conversation history: {str(e)}", icon=":material/warning:")
+                        st.success(f"Loaded conversation: {conv['thread_id']}", icon=":material/check_circle:")
                         st.rerun()
                 
                 with col3:
-                    if st.button("🗑️ Del", key=f"del_{conv['thread_id']}"):
+                    if st.button("Delete", key=f"del_{conv['thread_id']}", icon=":material/delete:"):
                         if st.session_state.persistent_storage.delete_conversation(conv['thread_id']):
-                            st.success("Conversation deleted")
+                            st.success("Conversation deleted", icon=":material/check_circle:")
                             st.rerun()
-                
-                st.divider()
 
 
 def render_memory_management_section():
     """Render memory management options."""
-    with st.expander("Memory Management"):
+    with st.expander("Memory management"):
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("🗑️ Clear Memory"):
+            if st.button("Clear memory", icon=":material/delete:"):
                 if hasattr(st.session_state, 'checkpointer') and st.session_state.checkpointer:
                     try:
                         st.session_state.chat_history = []
                         if hasattr(st.session_state, 'agent') and st.session_state.agent:
                             st.session_state.agent = None
-                        st.success("Memory cleared successfully!")
+                        st.success("Memory cleared successfully", icon=":material/check_circle:")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error clearing memory: {str(e)}")
+                        st.error(f"Error clearing memory: {str(e)}", icon=":material/error:")
         
         with col2:
             max_messages = st.number_input(
-                "Max Messages",
+                "Max messages",
                 min_value=10,
                 max_value=1000,
                 value=st.session_state.get('max_messages', 100),
@@ -561,7 +551,7 @@ def render_memory_management_section():
         # Memory status
         if 'chat_history' in st.session_state:
             current_messages = len(st.session_state.chat_history)
-            st.info(f"Current conversation: {current_messages} messages")
+            st.caption(f"Current conversation: {current_messages} messages")
         
         # Persistent storage actions
         render_persistent_storage_actions()
@@ -573,11 +563,11 @@ def render_persistent_storage_actions():
     if (memory_type == "Persistent (Cross-session)" and 
         hasattr(st.session_state, 'persistent_storage')):
         
-        st.subheader("Persistent Storage Actions")
+        st.subheader("Persistent storage actions")
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("💾 Save Current Conversation"):
+            if st.button("Save current conversation", icon=":material/save:"):
                 if st.session_state.chat_history:
                     # Generate a title from the first user message
                     title = None
@@ -593,35 +583,36 @@ def render_persistent_storage_actions():
                         message_count=len(st.session_state.chat_history),
                         last_message=st.session_state.chat_history[-1].get('content', '') if st.session_state.chat_history else ''
                     )
-                    st.success("Conversation metadata saved!")
+                    st.success("Conversation metadata saved", icon=":material/check_circle:")
                 else:
-                    st.warning("No conversation to save")
+                    st.warning("No conversation to save", icon=":material/warning:")
         
         with col2:
-            if st.button("📤 Export Conversation"):
+            if st.button("Export conversation", icon=":material/upload:"):
                 thread_id = st.session_state.get('thread_id', 'default')
                 export_data = st.session_state.persistent_storage.export_conversation(thread_id)
                 if export_data:
                     json_str, filename = create_download_data(export_data, f"conversation_{thread_id}")
                     st.download_button(
-                        label="📁 Download Export",
+                        label="Download export",
                         data=json_str,
                         file_name=filename,
-                        mime="application/json"
+                        mime="application/json",
+                        icon=":material/download:",
                     )
                 else:
-                    st.error("Failed to export conversation")
+                    st.error("Failed to export conversation", icon=":material/error:")
 
 
 def render_server_configuration(llm_config: Dict, memory_config: Dict) -> Dict:
     """Render MCP server configuration section."""
-    st.header("MCP Server Configuration")
+    st.subheader("MCP servers")
     
     provider = llm_config.get("provider", "")
     default_index = 0  # Index 0 = "Single Server"
     
     server_mode = st.radio(
-        "Server Mode",
+        "Server mode",
         options=["Single Server", "Multiple Servers", "No MCP Server (Chat Only)"],
         index=default_index,
         key=f"server_mode_radio_{provider}",  # Force re-render when provider changes
@@ -639,7 +630,7 @@ def render_server_configuration(llm_config: Dict, memory_config: Dict) -> Dict:
 def render_single_server_config(llm_config: Dict, memory_config: Dict) -> Dict:
     """Render single server configuration."""
     server_url = st.text_input(
-        "MCP Server URL",
+        "MCP server URL",
         value="http://localhost:8000/sse",
         help="Enter the URL of your MCP server (SSE endpoint)"
     )
@@ -652,11 +643,11 @@ def render_single_server_config(llm_config: Dict, memory_config: Dict) -> Dict:
 
 def render_multiple_servers_config(llm_config: Dict, memory_config: Dict) -> Dict:
     """Render multiple servers configuration."""
-    st.subheader("Server Management")
+    st.subheader("Server management")
     
     # Server input
     server_name = st.text_input(
-        "Server Name",
+        "Server name",
         value="",
         help="Enter a unique name for this server (e.g., 'weather', 'math')"
     )
@@ -683,14 +674,14 @@ def render_multiple_servers_config(llm_config: Dict, memory_config: Dict) -> Dic
 
 def render_chat_only_config(llm_config: Dict, memory_config: Dict) -> Dict:
     """Render chat-only mode configuration."""
-    st.subheader("Direct Chat Mode")
-    st.info("💬 This mode provides a direct chat interface with the LLM without any MCP tools.")
+    st.subheader("Direct chat mode")
+    st.info("This mode provides a direct chat interface with the LLM without any MCP tools.", icon=":material/chat_bubble:")
     
     if st.button("Start Chat Agent", type="primary"):
         return handle_chat_only_connection(llm_config, memory_config)
     
     # Information about chat-only mode
-    with st.expander("ℹ️ About Chat-Only Mode"):
+    with st.expander("About chat-only mode", icon=":material/info:"):
         st.markdown("""
         **Chat-Only Mode** provides a direct interface to the selected LLM without any MCP server tools.
         
@@ -740,7 +731,7 @@ def handle_single_server_connection(llm_config: Dict, memory_config: Dict, serve
                 progress_placeholder = st.empty()
                 
                 # Step 1: Setup configuration
-                progress_placeholder.info("🔧 Setting up server configuration...")
+                progress_placeholder.info("Setting up server configuration...", icon=":material/handyman:")
                 server_config = create_single_server_config(
                     server_url, 
                     timeout=60,  # 1 minute for initial connection
@@ -748,7 +739,7 @@ def handle_single_server_connection(llm_config: Dict, memory_config: Dict, serve
                 )
                 
                 # Step 2: Initialize MCP connection manager
-                progress_placeholder.info("🌐 Initializing MCP connection manager...")
+                progress_placeholder.info("Initializing MCP connection manager...", icon=":material/language:")
                 
                 # Get or create the connection manager
                 mcp_manager = MCPConnectionManager.get_instance()
@@ -758,49 +749,49 @@ def handle_single_server_connection(llm_config: Dict, memory_config: Dict, serve
                 try:
                     run_async(lambda: mcp_manager.start(server_config))
                     if not mcp_manager.is_connected:
-                        progress_placeholder.error("❌ Failed to start MCP connection manager")
+                        progress_placeholder.error("Failed to start MCP connection manager", icon=":material/error:")
                         return {"mode": "single", "connected": False}
                 except Exception as e:
                     formatted_error = format_error_message(e)
-                    progress_placeholder.error(f"❌ Failed to start MCP connection manager: {formatted_error}")
+                    progress_placeholder.error(f"Failed to start MCP connection manager: {formatted_error}", icon=":material/error:")
                     return {"mode": "single", "connected": False}
                 
                 # Step 3: Get tools
-                progress_placeholder.info("🔍 Retrieving tools from server...")
+                progress_placeholder.info("Retrieving tools from server...", icon=":material/search:")
                 try:
                     tools = run_async(lambda: mcp_manager.get_tools())
                     if tools is None:
                         tools = []
                 except Exception as e:
                     formatted_error = format_error_message(e)
-                    progress_placeholder.error(f"❌ Failed to retrieve tools: {formatted_error}")
+                    progress_placeholder.error(f"Failed to retrieve tools: {formatted_error}", icon=":material/error:")
                     return {"mode": "single", "connected": False}
                 
                 st.session_state.tools = tools
                 
                 # Step 4: Create agent
-                progress_placeholder.info("🤖 Creating and configuring agent...")
+                progress_placeholder.info("Creating and configuring agent...", icon=":material/smart_toy:")
                 success = create_and_configure_agent(llm_config, memory_config, st.session_state.tools)
                 
                 if success:
                     progress_placeholder.empty()  # Clear progress messages
-                    st.success(f"✅ Connected to MCP server! Found {len(st.session_state.tools)} tools.")
-                    with st.expander("🔧 Connection Details"):
+                    st.success(f"Connected to MCP server. Found {len(st.session_state.tools)} tools.", icon=":material/check_circle:")
+                    with st.expander("Connection details", icon=":material/handyman:"):
                         st.write(f"**Server URL:** {server_url}")
                         st.write(f"**Tools found:** {len(st.session_state.tools)}")
                         st.write(f"**Connection timeout:** 1 minute")
                         st.write(f"**SSE read timeout:** 5 minutes")
                     return {"mode": "single", "connected": True}
                 else:
-                    progress_placeholder.error("❌ Failed to configure agent")
+                    progress_placeholder.error("Failed to configure agent", icon=":material/error:")
                     return {"mode": "single", "connected": False}
                     
             except Exception as e:
                 formatted_error = format_error_message(e)
-                st.error(f"❌ Error connecting to MCP server: {formatted_error}")
+                st.error(f"Error connecting to MCP server: {formatted_error}", icon=":material/error:")
                 
                 # Show additional troubleshooting info
-                with st.expander("🔍 Troubleshooting"):
+                with st.expander("Troubleshooting", icon=":material/search:"):
                     st.write("**Common solutions:**")
                     st.write("• Check that the MCP server is running and accessible")
                     st.write("• Verify the server URL is correct")
@@ -845,7 +836,7 @@ def handle_multiple_servers_connection(llm_config: Dict, memory_config: Dict) ->
                     return {"mode": "multiple", "connected": False}
             except Exception as e:
                 formatted_error = format_error_message(e)
-                st.error(f"❌ Failed to start MCP connection manager: {formatted_error}")
+                st.error(f"Failed to start MCP connection manager: {formatted_error}", icon=":material/error:")
                 return {"mode": "multiple", "connected": False}
             
             # Get tools from the manager
@@ -855,7 +846,7 @@ def handle_multiple_servers_connection(llm_config: Dict, memory_config: Dict) ->
                     tools = []
             except Exception as e:
                 formatted_error = format_error_message(e)
-                st.error(f"❌ Failed to retrieve tools: {formatted_error}")
+                st.error(f"Failed to retrieve tools: {formatted_error}", icon=":material/error:")
                 return {"mode": "multiple", "connected": False}
             
             st.session_state.tools = tools
@@ -864,8 +855,8 @@ def handle_multiple_servers_connection(llm_config: Dict, memory_config: Dict) ->
             success = create_and_configure_agent(llm_config, memory_config, st.session_state.tools)
             
             if success:
-                st.success(f"✅ Connected to {len(st.session_state.servers)} MCP servers! Found {len(st.session_state.tools)} tools.")
-                with st.expander("🔧 Connection Details"):
+                st.success(f"Connected to {len(st.session_state.servers)} MCP servers. Found {len(st.session_state.tools)} tools.", icon=":material/check_circle:")
+                with st.expander("Connection details", icon=":material/handyman:"):
                     st.write(f"**Servers connected:** {len(st.session_state.servers)}")
                     for name, config in st.session_state.servers.items():
                         st.write(f"  • {name}: {config['url']}")
@@ -876,10 +867,10 @@ def handle_multiple_servers_connection(llm_config: Dict, memory_config: Dict) ->
                 
         except Exception as e:
             formatted_error = format_error_message(e)
-            st.error(f"❌ Error connecting to MCP servers: {formatted_error}")
+            st.error(f"Error connecting to MCP servers: {formatted_error}", icon=":material/error:")
             
             # Show additional troubleshooting info
-            with st.expander("🔍 Troubleshooting"):
+            with st.expander("Troubleshooting", icon=":material/search:"):
                 st.write("**Common solutions:**")
                 st.write("• Check that all MCP servers are running and accessible")
                 st.write("• Verify all server URLs are correct")
@@ -934,15 +925,15 @@ def handle_chat_only_connection(llm_config: Dict, memory_config: Dict) -> Dict:
                 # Determine appropriate success message
                 if not supports_tools:
                     if memory_config.get("enabled"):
-                        st.success("✅ Chat agent ready! (Memory enabled, but model doesn't support tools)")
-                        st.info("ℹ️ This model doesn't support tool calling, so memory will work through conversation history only.")
+                        st.success("Chat agent ready (memory enabled, but model does not support tools).", icon=":material/check_circle:")
+                        st.info("This model does not support tool calling, so memory will work through conversation history only.", icon=":material/info:")
                     else:
-                        st.success("✅ Chat agent ready! (Simple chat mode - no tools, no memory)")
+                        st.success("Chat agent ready (simple chat mode - no tools, no memory).", icon=":material/check_circle:")
                 else:
                     if memory_config.get("enabled"):
-                        st.success("✅ Chat agent ready! (Memory enabled with history tool)")
+                        st.success("Chat agent ready (memory enabled with history tool).", icon=":material/check_circle:")
                     else:
-                        st.success("✅ Chat agent ready! (No additional tools)")
+                        st.success("Chat agent ready (no additional tools).", icon=":material/check_circle:")
                 return {"mode": "chat_only", "connected": True}
             else:
                 return {"mode": "chat_only", "connected": False}
@@ -950,7 +941,7 @@ def handle_chat_only_connection(llm_config: Dict, memory_config: Dict) -> Dict:
         except Exception as e:
             error_message = str(e)
             if "does not support tools" in error_message:
-                st.error("❌ This model doesn't support tool calling. The agent has been configured in simple chat mode.")
+                st.error("This model does not support tool calling. The agent has been configured in simple chat mode.", icon=":material/error:")
                 st.info("ℹ️ Memory and tool features are disabled for this model, but basic conversation works.")
             else:
                 st.error(f"Error initializing chat agent: {error_message}")
@@ -1037,7 +1028,7 @@ def handle_add_server(server_name: str, server_url: str):
 def render_configured_servers():
     """Render the list of configured servers."""
     if st.session_state.servers:
-        st.subheader("Configured Servers")
+        st.subheader("Configured servers")
         for name, config in st.session_state.servers.items():
             with st.expander(f"Server: {name}"):
                 st.write(f"**URL:** {config['url']}")
@@ -1052,20 +1043,20 @@ def render_available_tools():
     mcp_manager = st.session_state.get('mcp_manager')
     if mcp_manager:
         if mcp_manager.is_connected:
-            st.success("🟢 MCP Connection: Connected")
+            st.success("MCP connection: Connected", icon=":material/check_circle:")
         elif mcp_manager.running:
-            st.warning("🟡 MCP Connection: Reconnecting...")
+            st.warning("MCP connection: Reconnecting...", icon=":material/pending:")
         else:
-            st.error("🔴 MCP Connection: Disconnected")
+            st.error("MCP connection: Disconnected", icon=":material/error:")
     else:
-        st.info("⚫ MCP Connection: Not initialized")
+        st.caption("MCP connection: Not initialized")
     
     # Always show the tools header if we have a manager
     if mcp_manager or st.session_state.get('agent'):
-        st.header("Available Tools")
+        st.subheader("Available tools")
         
         # Add refresh button for tools
-        if mcp_manager and st.button("🔄 Refresh Tools"):
+        if mcp_manager and st.button("Refresh tools", icon=":material/sync:"):
             try:
                 tools = run_async(lambda: mcp_manager.get_tools(force_refresh=True))
                 st.session_state.tools = tools or []
@@ -1085,27 +1076,27 @@ def render_available_tools():
     if st.session_state.tools or (st.session_state.agent and st.session_state.get('memory_enabled', False)):
         
         if not supports_tools and st.session_state.get('memory_enabled', False):
-            st.info("🧠 Memory enabled (conversation history only - model doesn't support tool calling)")
-            st.warning("⚠️ This model doesn't support tools, so the history tool is not available. Memory works through conversation context only.")
+            st.info("Memory enabled (conversation history only - model does not support tool calling)", icon=":material/psychology:")
+            st.warning("This model does not support tools, so the history tool is not available. Memory works through conversation context only.", icon=":material/warning:")
         elif mcp_tool_count > 0 and memory_tool_count > 0:
-            st.info(f"🔧 {total_tools} tools available ({mcp_tool_count} MCP + {memory_tool_count} memory tool)")
+            st.caption(f"{total_tools} tools available ({mcp_tool_count} MCP + {memory_tool_count} memory tool)")
         elif mcp_tool_count > 0:
-            st.info(f"🔧 {mcp_tool_count} MCP tools available")
+            st.caption(f"{mcp_tool_count} MCP tools available")
         elif memory_tool_count > 0:
-            st.info(f"🔧 {memory_tool_count} memory tool available")
+            st.caption(f"{memory_tool_count} memory tool available")
         else:
-            st.info("📊 No tools available (Chat-only mode)")
+            st.caption("No tools available (chat-only mode)")
         
         render_tool_selector()
     elif st.session_state.agent:
         # Agent exists but no tools - show appropriate message
         model_name = st.session_state.get('selected_model', '')
         if not model_supports_tools(model_name):
-            st.header("Agent Status")
-            st.info("💬 Simple chat mode - this model doesn't support tool calling")
+            st.subheader("Agent status")
+            st.caption("Simple chat mode - this model does not support tool calling")
         else:
-            st.header("Available Tools")
-            st.info("📊 No tools available (Chat-only mode)")
+            st.subheader("Available tools")
+            st.caption("No tools available (chat-only mode)")
 
 
 def render_tool_selector():
@@ -1122,7 +1113,7 @@ def render_tool_selector():
     # Only show tool selection if there are tools available
     if tool_options:
         selected_tool_name = st.selectbox(
-            "Available Tools",
+            "Available tools",
             options=tool_options,
             index=0 if tool_options else None
         )
@@ -1132,9 +1123,9 @@ def render_tool_selector():
     else:
         # No tools available
         if st.session_state.get('memory_enabled', False) and not supports_tools:
-            st.info("💬 Memory is enabled but works through conversation context only (no tool interface)")
+            st.caption("Memory is enabled but works through conversation context only (no tool interface)")
         else:
-            st.info("💬 In Chat-Only mode - no external tools available")
+            st.caption("In chat-only mode - no external tools available")
 
 
 def render_tool_information(selected_tool_name: str):
@@ -1156,7 +1147,7 @@ def render_tool_information(selected_tool_name: str):
         st.code("date_to: string (optional) [YYYY-MM-DD format]")
         st.code("include_metadata: boolean (optional) [default: true]")
         
-        with st.expander("🔍 Advanced Search Examples"):
+        with st.expander("Advanced search examples", icon=":material/search:"):
             st.write("**Simple Text Search:**")
             st.code('search_query="weather"')
             
@@ -1176,7 +1167,7 @@ def render_tool_information(selected_tool_name: str):
             st.code('search_query="tool AND (success OR complete) NOT error"')
             st.code('search_query="regex:API.*key AND NOT expired"')
         
-        st.info("💡 This enhanced tool provides enterprise-grade conversation history access with powerful search capabilities including boolean logic and regex pattern matching.")
+        st.info("This enhanced tool provides enterprise-grade conversation history access with powerful search capabilities including boolean logic and regex pattern matching.", icon=":material/tips_and_updates:")
     else:
         # Find the selected MCP tool
         selected_tool = next((tool for tool in st.session_state.tools if tool.name == selected_tool_name), None)
