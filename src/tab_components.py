@@ -16,8 +16,7 @@ from langchain_core.messages import HumanMessage
 
 from .agent_manager import (
     run_agent, run_tool, prepare_agent_invocation_config,
-    extract_tool_executions_from_response, extract_assistant_response,
-    stream_agent_response, stream_agent_events
+    extract_tool_executions_from_response, extract_assistant_response
 )
 from .memory_tools import calculate_chat_statistics, format_chat_history_for_export
 from .utils import (
@@ -139,6 +138,59 @@ def detect_reasoning_in_stream(text_buffer: str, thinking_round: int = 1) -> Dic
             result['thinking_content'] = text_buffer[think_content_start:].strip()
     
     return result
+
+
+def _safe_event_data(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Return event data as a dictionary, handling None/non-dict payloads safely."""
+    data = event.get("data")
+    return data if isinstance(data, dict) else {}
+
+
+def _extract_chunk_text(chunk: Any) -> str:
+    """
+    Extract text from streamed chunks across LangChain/LangGraph provider variants.
+
+    Supports AIMessageChunk `.text`, `.content`, `.content_blocks`, and dict payloads.
+    """
+    if chunk is None:
+        return ""
+
+    # Newer LangChain chat chunks expose `.text` as the normalized incremental text.
+    chunk_text_attr = getattr(chunk, "text", None)
+    if isinstance(chunk_text_attr, str) and chunk_text_attr:
+        return chunk_text_attr
+
+    # Some stream payloads arrive as dictionaries (e.g., with nested messages/chunks).
+    if isinstance(chunk, dict):
+        if "text" in chunk and isinstance(chunk["text"], str):
+            return chunk["text"]
+        if "content_blocks" in chunk:
+            text = coerce_content_to_text(chunk.get("content_blocks"))
+            if text:
+                return text
+        if "content" in chunk:
+            text = coerce_content_to_text(chunk.get("content"))
+            if text:
+                return text
+        nested_messages = chunk.get("messages")
+        if isinstance(nested_messages, list) and nested_messages:
+            return _extract_chunk_text(nested_messages[-1])
+        return ""
+
+    # Fallback for object-style chunks.
+    content_blocks = getattr(chunk, "content_blocks", None)
+    if content_blocks is not None:
+        text = coerce_content_to_text(content_blocks)
+        if text:
+            return text
+
+    content = getattr(chunk, "content", None)
+    if content is not None:
+        text = coerce_content_to_text(content)
+        if text:
+            return text
+
+    return ""
 
 
 def render_chat_tab():
@@ -503,211 +555,78 @@ def process_streaming_response(user_input: str, message_content: Any):
     try:
         # Track if response streaming has started
         response_started = False
-        
-        # Create async generator processing function
-        async def process_streaming():
-            nonlocal current_response, tool_executions, thinking_content, final_response, response_started
-            
-            # Placeholders for streaming content
-            thinking_stream_placeholder = None
-            response_placeholder = None
-            
-            # Track different phases
-            thinking_phase = True
-            tool_phase = False
-            reasoning_complete = False
-            text_buffer = ""
-            thinking_round = 1  # Track which round of thinking we're in
-            all_thinking_content = []  # Accumulate all thinking rounds for chat history
-            
-            # Update main status
-            with main_status_container.container():
-                with st.status(":material/smart_toy: Processing your request...", expanded=True) as main_status:
-                    main_status.update(label=":material/psychology: **Agent initialized** - Analyzing your request...", state="running")
-                    
-                    async for event in stream_agent_events(st.session_state.agent, message_content, config):
-                        event_type = event.get("event")
-                        event_name = event.get("name", "")
-                        
-                        # Handle different event types with enhanced status updates
-                        if event_type == "on_chain_start":
-                            if "agent" in event_name.lower():
-                                main_status.update(label=":material/search: **Agent reasoning** - Planning approach...", state="running")
-                                thinking_phase = True
-                        
-                        elif event_type == "on_tool_start":
-                            # Tool execution started
-                            tool_name = event.get("name", "Unknown")
-                            tool_input = event.get("data", {}).get("input", {})
-                            
-                            if thinking_phase:
-                                main_status.update(label=":material/check_circle: **Planning complete** - Ready to execute tools", state="complete")
-                                thinking_phase = False
-                                tool_phase = True
-                            
-                            # Track tool execution without nested status
-                            main_status.update(label=f":material/handyman: **Starting tool:** {tool_name}", state="running")
-                            if tool_input:
-                                st.write(f":material/handyman: Using tool: {tool_name}")
-                        
-                        elif event_type == "on_tool_end":
-                            # Tool execution completed
-                            tool_name = event.get("name", "Unknown")
-                            tool_output = event.get("data", {}).get("output", "")
-                            tool_input = event.get("data", {}).get("input", {})
-                            
-                            main_status.update(label=f":material/check_circle: **Completed tool:** {tool_name}", state="complete")
-                            st.write(f":material/handyman: Finished using tool: {tool_name}")
-                            
-                            # Store tool execution data
-                            tool_executions.append({
-                                "tool_name": tool_name,
-                                "input": tool_input,
-                                "output": tool_output,
-                                "timestamp": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                            })
-                            
-                            # Reset reasoning detection for potential post-tool thinking
-                            reasoning_complete = False
-                            thinking_stream_placeholder = None
-                            thinking_round += 1
-                            # Clear current thinking content for new round (but keep accumulated)
-                            thinking_content = ""
-                        
-                        elif event_type == "on_chat_model_start":
-                            if tool_phase:
-                                main_status.update(label=":material/my_location: **Tool execution complete** - Generating response...", state="running")
-                                tool_phase = False
-                        
-                        elif event_type == "on_chat_model_stream":
-                            # Handle streaming tokens from the chat model
-                            chunk = event.get("data", {}).get("chunk", {})
-                            if hasattr(chunk, 'content') and chunk.content:
-                                chunk_text = coerce_content_to_text(chunk.content)
-                                if not chunk_text:
-                                    continue
-                                # Add to text buffer for reasoning detection
-                                text_buffer += chunk_text
-                                
-                                # Check for reasoning content
-                                reasoning_info = detect_reasoning_in_stream(text_buffer, thinking_round)
-                                
-                                if reasoning_info['has_thinking'] and not reasoning_complete:
-                                    # We're in thinking mode - show thinking content
-                                    current_thinking = reasoning_info['thinking_content']
-                                    
-                                    # Display thinking in status container
-                                    if thinking_stream_placeholder is None:
-                                        if thinking_round == 1:
-                                            main_status.update(label=":material/psychology: **AI is thinking...**", state="running")
-                                        else:
-                                            main_status.update(label=f":material/psychology: **AI is thinking** (round {thinking_round})...", state="running")
-                                        thinking_stream_placeholder = st.empty()
-                                    
-                                    with thinking_stream_placeholder:
-                                        st.text(f"{current_thinking}")
-                                    
-                                    # Check if thinking is complete
-                                    if reasoning_info['thinking_complete']:
-                                        thinking_content = reasoning_info['thinking_content']
-                                        current_response = reasoning_info['response_content']
-                                        reasoning_complete = True
-                                        
-                                        # Add this thinking round to accumulated content
-                                        if thinking_round > 1:
-                                            all_thinking_content.append(f"**Round {thinking_round}:**\n{thinking_content}")
-                                        else:
-                                            all_thinking_content.append(thinking_content)
-                                        
-                                        # Show completion of this thinking round
-                                        if thinking_round > 1:
-                                            st.badge(f"Thinking round {thinking_round} complete", icon=":material/check_circle:", color="green")
-                                        else:
-                                            st.badge("Thinking complete", icon=":material/check_circle:", color="green")
-                                
-                                elif reasoning_complete:
-                                    # Thinking is complete, accumulate and stream response content
-                                    if reasoning_info['response_content'] != current_response:
-                                        current_response = reasoning_info['response_content']
-                                        
-                                        # Start streaming response inside status container
-                                        if not response_started:
-                                            main_status.update(label=":material/stream: **Streaming response...**", state="running")
-                                            response_started = True
-                                            st.write(":material/chat_bubble: **Final response:**")
-                                            response_placeholder = st.empty()
-                                        
-                                        # Update response in real-time inside status container
-                                        if response_started:
-                                            response_placeholder.write(current_response)
-                                else:
-                                    # No reasoning detected, accumulate and stream normal response
-                                    current_response += chunk_text
-                                    
-                                    # Start streaming response inside status container
-                                    if not response_started:
-                                        main_status.update(label=":material/stream: **Streaming response...**", state="running")
-                                        response_started = True
-                                        st.write(":material/chat_bubble: **Final response:**")
-                                        response_placeholder = st.empty()
-                                    
-                                    # Update response in real-time inside status container
-                                    if response_started:
-                                        response_placeholder.write(current_response)
-                        
-                        elif event_type == "on_chat_model_end":
-                            # Model finished generating
-                            final_response_event = event.get("data", {}).get("output", {})
-                            
-                            # If we didn't get content through streaming, use the final response
-                            if not current_response and final_response_event:
-                                if hasattr(final_response_event, 'content'):
-                                    full_content = final_response_event.content
-                                elif isinstance(final_response_event, str):
-                                    full_content = final_response_event
-                                else:
-                                    full_content = str(final_response_event)
-                                
-                                # Parse the full content for reasoning
-                                full_text = coerce_content_to_text(full_content)
-                                parsed_content = parse_reasoning_content(full_text)
-                                
-                                if parsed_content['thinking']:
-                                    thinking_content = parsed_content['thinking']
-                                    current_response = parsed_content['response']
-                                    
-                                    # Show thinking if we haven't already
-                                    if not reasoning_complete:
-                                        st.write(":material/psychology: **Model reasoning detected**")
-                                        
-                                        # Display thinking content inside the current status container
-                                        st.text(f"{thinking_content}")
-                                        
-                                        # Add to accumulated thinking content
-                                        all_thinking_content.append(thinking_content)
-                                        
-                                        reasoning_complete = True
-                                else:
-                                    current_response = full_text
-                    
-                    # Update main status when processing is complete
-                    if current_response:
-                        main_status.update(
-                            label=":material/check_circle: Response complete",
-                            state="complete"
-                        )
-                        main_status.update(label=":material/edit_note: **Processing complete** - Streaming response...", state="complete")
-            
-            return current_response, tool_executions, all_thinking_content
-        
-        # Process the streaming using run_async
-        result = run_async(process_streaming())
-        if result:
-            final_response, final_tool_executions, final_thinking_list = result
-            current_response = final_response or current_response
-            tool_executions = final_tool_executions or tool_executions
-            # Combine all thinking rounds into a single string for chat history
-            thinking_content = "\n\n".join(final_thinking_list) if final_thinking_list else ""
+        thinking_stream_placeholder = None
+        response_placeholder = None
+        reasoning_complete = False
+        text_buffer = ""
+        all_thinking_content = []
+
+        with main_status_container.container():
+            with st.status(":material/smart_toy: Processing your request...", expanded=True) as main_status:
+                main_status.update(label=":material/psychology: **Agent initialized** - Analyzing your request...", state="running")
+
+                stream_kwargs = {"stream_mode": "messages"}
+                if config:
+                    stream_kwargs["config"] = config
+
+                stream_iter = st.session_state.agent.stream(
+                    {"messages": [HumanMessage(content=message_content)]},
+                    **stream_kwargs
+                )
+
+                for item in stream_iter:
+                    # LangGraph yields (chunk, metadata) in stream_mode="messages"
+                    chunk = item[0] if isinstance(item, tuple) and item else item
+                    chunk_text = _extract_chunk_text(chunk)
+                    if not chunk_text:
+                        continue
+
+                    text_buffer += chunk_text
+                    reasoning_info = detect_reasoning_in_stream(text_buffer, 1)
+
+                    if reasoning_info['has_thinking'] and not reasoning_complete:
+                        current_thinking = reasoning_info['thinking_content']
+
+                        if thinking_stream_placeholder is None:
+                            main_status.update(label=":material/psychology: **AI is thinking...**", state="running")
+                            thinking_stream_placeholder = st.empty()
+
+                        with thinking_stream_placeholder:
+                            st.text(f"{current_thinking}")
+
+                        if reasoning_info['thinking_complete']:
+                            thinking_content = reasoning_info['thinking_content']
+                            current_response = reasoning_info['response_content']
+                            reasoning_complete = True
+                            all_thinking_content.append(thinking_content)
+                            st.badge("Thinking complete", icon=":material/check_circle:", color="green")
+
+                    elif reasoning_complete:
+                        if reasoning_info['response_content'] != current_response:
+                            current_response = reasoning_info['response_content']
+                            if not response_started:
+                                main_status.update(label=":material/stream: **Streaming response...**", state="running")
+                                response_started = True
+                                st.write(":material/chat_bubble: **Final response:**")
+                                response_placeholder = st.empty()
+                            if response_started and response_placeholder is not None:
+                                response_placeholder.write(current_response)
+                    else:
+                        current_response += chunk_text
+                        if not response_started:
+                            main_status.update(label=":material/stream: **Streaming response...**", state="running")
+                            response_started = True
+                            st.write(":material/chat_bubble: **Final response:**")
+                            response_placeholder = st.empty()
+                        if response_started and response_placeholder is not None:
+                            response_placeholder.write(current_response)
+
+                # Keep a consistent aggregated thinking output for chat history.
+                thinking_content = "\n\n".join(all_thinking_content) if all_thinking_content else thinking_content
+
+                if current_response:
+                    main_status.update(label=":material/check_circle: Response complete", state="complete")
+                    main_status.update(label=":material/edit_note: **Processing complete** - Streaming response...", state="complete")
             
     except Exception as e:
         # Cache streaming failure for this provider/model for the current session.
@@ -716,10 +635,16 @@ def process_streaming_response(user_input: str, message_content: Any):
             st.session_state.streaming_disabled_models = {}
         st.session_state.streaming_disabled_models[cache_key] = True
 
+        formatted_error = format_error_message(e).strip()
+        if not formatted_error:
+            formatted_error = f"{type(e).__name__}: (no error message provided by provider/runtime)"
+
         # Update main status to show error
         with main_status_container.container():
             with st.status(":material/error: Processing failed", expanded=True, state="error"):
-                st.error(f"Streaming failed: {str(e)}", icon=":material/error:")
+                st.error(f"Streaming failed: {formatted_error}", icon=":material/error:")
+                with st.expander("Technical details", icon=":material/description:"):
+                    st.code(traceback.format_exc(), language="python")
                 st.info("Falling back to non-streaming mode...", icon=":material/sync:")
                 st.info("This model will use non-streaming automatically for the rest of this session.", icon=":material/save:")
         
