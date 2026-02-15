@@ -8,12 +8,6 @@ This Streamlit application provides a user interface for connecting to MCP (Mode
 
 **This application is currently in active development.** While functional, you may encounter bugs, incomplete features, or unexpected behavior. We appreciate your patience and welcome feedback to help improve the application.
 
-### Gemini + MCP Status
-
-- Google Gemini tool-calling with MCP is enabled on the latest dependency stack.
-- If your selected Gemini model/account cannot use tools, switch to Chat-Only mode.
-- For best results, keep dependencies synchronized with `uv sync`.
-
 ## Features
 
 - **Multi-Provider LLM Support**: OpenAI, Anthropic Claude, Google Gemini, and Ollama
