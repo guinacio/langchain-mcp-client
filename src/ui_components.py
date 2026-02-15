@@ -1049,7 +1049,7 @@ def render_available_tools():
         else:
             st.error("MCP connection: Disconnected", icon=":material/error:")
     else:
-        st.caption("MCP connection: Not initialized")
+        st.caption("MCP connection: :orange-badge[Not initialized]")
     
     # Always show the tools header if we have a manager
     if mcp_manager or st.session_state.get('agent'):
