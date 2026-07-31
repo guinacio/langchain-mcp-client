@@ -7,9 +7,13 @@ server configurations, and tool retrieval.
 
 import asyncio
 import atexit
+import ipaddress
 import logging
+import os
 import random
+import socket
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_core.tools import BaseTool
 
@@ -83,6 +87,11 @@ class MCPConnectionManager:
             server_config: Server configuration dictionary
         """
         async with self.lock:
+            for config in server_config.values():
+                url = config.get("url")
+                if url:
+                    ensure_valid_server_url(url)
+
             # If already running with same config, no-op
             if self.running and self.server_config == server_config:
                 logger.info("MCP connection already running with same configuration")
@@ -313,6 +322,7 @@ def create_single_server_config(server_url: str, timeout: int = 600, sse_read_ti
     Returns:
         Server configuration dictionary
     """
+    ensure_valid_server_url(server_url)
     return {
         "default_server": {
             "transport": "sse",
@@ -338,6 +348,7 @@ def create_multi_server_config(servers: Dict[str, str], timeout: int = 600, sse_
     """
     config = {}
     for name, url in servers.items():
+        ensure_valid_server_url(url)
         config[name] = {
             "transport": "sse",
             "url": url,
@@ -346,6 +357,59 @@ def create_multi_server_config(servers: Dict[str, str], timeout: int = 600, sse_
             "sse_read_timeout": sse_read_timeout
         }
     return config
+
+
+def _private_server_urls_allowed() -> bool:
+    return os.environ.get("MCP_ALLOW_PRIVATE_URLS", "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
+def ensure_valid_server_url(url: str, allow_private: Optional[bool] = None) -> None:
+    """Reject unsafe server-side destinations before an outbound connection.
+
+    Loopback remains available for the app's local-first workflow. Link-local,
+    multicast, unspecified, and reserved targets are always rejected. RFC1918
+    and other private-network addresses require the operator-controlled
+    ``MCP_ALLOW_PRIVATE_URLS=true`` opt-in.
+    """
+    if not url:
+        raise ValueError("Server URL is required")
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("Server URL must be an absolute http:// or https:// URL")
+    if parsed.username or parsed.password:
+        raise ValueError("Server URLs containing embedded credentials are not allowed")
+
+    if allow_private is None:
+        allow_private = _private_server_urls_allowed()
+
+    try:
+        addresses = {
+            ipaddress.ip_address(item[4][0])
+            for item in socket.getaddrinfo(parsed.hostname, parsed.port or 80)
+        }
+    except (socket.gaierror, ValueError) as exc:
+        raise ValueError(f"Server hostname could not be resolved: {parsed.hostname}") from exc
+
+    for address in addresses:
+        if address.is_loopback:
+            continue
+        if (
+            address.is_link_local
+            or address.is_multicast
+            or address.is_unspecified
+            or address.is_reserved
+        ):
+            raise ValueError(f"Server URL resolves to a blocked address: {address}")
+        if address.is_private and not allow_private:
+            raise ValueError(
+                "Private-network server URLs are disabled. The deployment operator "
+                "must set MCP_ALLOW_PRIVATE_URLS=true for trusted local networks."
+            )
+        if not address.is_private and not address.is_global:
+            raise ValueError(f"Server URL resolves to a non-public address: {address}")
 
 
 def validate_server_url(url: str) -> bool:
@@ -358,13 +422,10 @@ def validate_server_url(url: str) -> bool:
     Returns:
         True if valid, False otherwise
     """
-    if not url:
+    try:
+        ensure_valid_server_url(url)
+    except ValueError:
         return False
-    
-    # Basic URL validation
-    if not (url.startswith("http://") or url.startswith("https://")):
-        return False
-    
     return True
 
 
@@ -374,4 +435,4 @@ def get_default_server_config() -> Dict[str, str]:
         "default_url": "http://localhost:8000/sse",
         "default_timeout": "600",
         "default_sse_timeout": "900"
-    } 
+    }

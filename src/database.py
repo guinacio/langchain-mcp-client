@@ -9,6 +9,7 @@ import sqlite3
 import threading
 import datetime
 import json
+from contextlib import closing
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -25,7 +26,10 @@ class PersistentStorageManager:
     Uses a simple manual save/load approach to avoid async context issues.
     """
     
-    def __init__(self, db_path: str = "conversations.db"):
+    def __init__(self, owner_id: str, db_path: str = "conversations.db"):
+        if not owner_id or not isinstance(owner_id, str):
+            raise ValueError("A server-issued storage owner ID is required")
+        self.owner_id = owner_id
         self.db_path = Path(db_path)
         self.lock = threading.Lock()
         self._ensure_database_exists()
@@ -33,18 +37,82 @@ class PersistentStorageManager:
     def _ensure_database_exists(self):
         """Create database and tables if they don't exist."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn:
                 cursor = conn.cursor()
                 
-                # Create conversations metadata table
+                # Migrate legacy globally-scoped tables before creating the
+                # owner-scoped schema. Legacy rows are quarantined and are not
+                # visible to any live browser session.
+                existing_columns = {
+                    row[1] for row in cursor.execute(
+                        "PRAGMA table_info(conversation_metadata)"
+                    ).fetchall()
+                }
+                if existing_columns and "owner_id" not in existing_columns:
+                    cursor.execute("PRAGMA foreign_keys = OFF")
+                    cursor.execute("""
+                        CREATE TABLE conversation_metadata_scoped (
+                            owner_id TEXT NOT NULL,
+                            thread_id TEXT NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            title TEXT,
+                            message_count INTEGER DEFAULT 0,
+                            last_message TEXT,
+                            PRIMARY KEY (owner_id, thread_id)
+                        )
+                    """)
+                    cursor.execute("""
+                        INSERT INTO conversation_metadata_scoped
+                        (owner_id, thread_id, created_at, updated_at, title, message_count, last_message)
+                        SELECT 'legacy-unscoped', thread_id, created_at, updated_at, title,
+                               message_count, last_message
+                        FROM conversation_metadata
+                    """)
+                    cursor.execute("""
+                        CREATE TABLE conversation_messages_scoped (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            owner_id TEXT NOT NULL,
+                            thread_id TEXT NOT NULL,
+                            role TEXT NOT NULL,
+                            content TEXT NOT NULL,
+                            timestamp TEXT NOT NULL,
+                            message_id TEXT,
+                            metadata TEXT,
+                            FOREIGN KEY (owner_id, thread_id)
+                                REFERENCES conversation_metadata_scoped (owner_id, thread_id)
+                                ON DELETE CASCADE
+                        )
+                    """)
+                    cursor.execute("""
+                        INSERT INTO conversation_messages_scoped
+                        (id, owner_id, thread_id, role, content, timestamp, message_id, metadata)
+                        SELECT id, 'legacy-unscoped', thread_id, role, content, timestamp,
+                               message_id, metadata
+                        FROM conversation_messages
+                    """)
+                    cursor.execute("DROP TABLE conversation_messages")
+                    cursor.execute("DROP TABLE conversation_metadata")
+                    cursor.execute(
+                        "ALTER TABLE conversation_metadata_scoped RENAME TO conversation_metadata"
+                    )
+                    cursor.execute(
+                        "ALTER TABLE conversation_messages_scoped RENAME TO conversation_messages"
+                    )
+                    conn.commit()
+                    cursor.execute("PRAGMA foreign_keys = ON")
+
+                # Create owner-scoped conversations metadata table
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS conversation_metadata (
-                        thread_id TEXT PRIMARY KEY,
+                        owner_id TEXT NOT NULL,
+                        thread_id TEXT NOT NULL,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         title TEXT,
                         message_count INTEGER DEFAULT 0,
-                        last_message TEXT
+                        last_message TEXT,
+                        PRIMARY KEY (owner_id, thread_id)
                     )
                 """)
                 
@@ -52,25 +120,56 @@ class PersistentStorageManager:
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS conversation_messages (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        owner_id TEXT NOT NULL,
                         thread_id TEXT NOT NULL,
                         role TEXT NOT NULL,
                         content TEXT NOT NULL,
                         timestamp TEXT NOT NULL,
                         message_id TEXT,
                         metadata TEXT,
-                        FOREIGN KEY (thread_id) REFERENCES conversation_metadata (thread_id)
+                        FOREIGN KEY (owner_id, thread_id)
+                            REFERENCES conversation_metadata (owner_id, thread_id)
+                            ON DELETE CASCADE
                     )
                 """)
                 
                 # Create index for better performance
                 cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_conversation_messages_thread_id 
-                    ON conversation_messages (thread_id)
+                    CREATE INDEX IF NOT EXISTS idx_conversation_messages_owner_thread
+                    ON conversation_messages (owner_id, thread_id)
                 """)
                 
                 conn.commit()
         except Exception as e:
             st.error(f"Error initializing database: {str(e)}")
+            raise
+
+    def _upsert_conversation_metadata(
+        self,
+        cursor: sqlite3.Cursor,
+        thread_id: str,
+        title: str = None,
+        message_count: int = None,
+        last_message: str = None,
+    ) -> None:
+        """Create or update metadata without REPLACE/delete semantics."""
+        cursor.execute("""
+            INSERT INTO conversation_metadata
+                (owner_id, thread_id, created_at, updated_at, title, message_count, last_message)
+            VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, COALESCE(?, 0), ?)
+            ON CONFLICT(owner_id, thread_id) DO UPDATE SET
+                updated_at = CURRENT_TIMESTAMP,
+                title = COALESCE(excluded.title, conversation_metadata.title),
+                message_count = COALESCE(?, conversation_metadata.message_count),
+                last_message = COALESCE(excluded.last_message, conversation_metadata.last_message)
+        """, (
+            self.owner_id,
+            thread_id,
+            title,
+            message_count,
+            last_message,
+            message_count,
+        ))
     
     def get_checkpointer_sync(self):
         """
@@ -83,6 +182,10 @@ class PersistentStorageManager:
             return SqliteSaver(conn)
         except Exception:
             return InMemorySaver()
+
+    def scoped_thread_id(self, thread_id: str) -> str:
+        """Return the opaque LangGraph thread ID for this storage owner."""
+        return f"{self.owner_id}:{thread_id}"
 
     async def get_async_checkpointer(self):
         """
@@ -101,11 +204,22 @@ class PersistentStorageManager:
         """
         try:
             with self.lock:
-                with sqlite3.connect(self.db_path) as conn:
+                with closing(sqlite3.connect(self.db_path)) as conn:
                     cursor = conn.cursor()
+
+                    self._upsert_conversation_metadata(
+                        cursor,
+                        thread_id=thread_id,
+                        title=self._generate_title(chat_history),
+                        message_count=len(chat_history),
+                        last_message=self._get_last_message(chat_history),
+                    )
                     
                     # Clear existing messages for this thread
-                    cursor.execute("DELETE FROM conversation_messages WHERE thread_id = ?", (thread_id,))
+                    cursor.execute(
+                        "DELETE FROM conversation_messages WHERE owner_id = ? AND thread_id = ?",
+                        (self.owner_id, thread_id),
+                    )
                     
                     # Insert all messages
                     for msg in chat_history:
@@ -119,9 +233,10 @@ class PersistentStorageManager:
                         
                         cursor.execute("""
                             INSERT INTO conversation_messages 
-                            (thread_id, role, content, timestamp, message_id, metadata)
-                            VALUES (?, ?, ?, ?, ?, ?)
+                            (owner_id, thread_id, role, content, timestamp, message_id, metadata)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
                         """, (
+                            self.owner_id,
                             thread_id,
                             msg.get('role', ''),
                             msg.get('content', ''),
@@ -132,14 +247,6 @@ class PersistentStorageManager:
                     
                     conn.commit()
                     
-                    # Update metadata
-                    self.update_conversation_metadata(
-                        thread_id=thread_id,
-                        title=self._generate_title(chat_history),
-                        message_count=len(chat_history),
-                        last_message=self._get_last_message(chat_history)
-                    )
-                    
         except Exception as e:
             # Don't show error to user for auto-save failures
             pass
@@ -149,17 +256,17 @@ class PersistentStorageManager:
         Load conversation messages from SQLite database.
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 
                 cursor.execute("""
                     SELECT role, content, timestamp, message_id, metadata
                     FROM conversation_messages
-                    WHERE thread_id = ?
+                    WHERE owner_id = ? AND thread_id = ?
                     ORDER BY id ASC
                     LIMIT ?
-                """, (thread_id, limit))
+                """, (self.owner_id, thread_id, limit))
                 
                 messages = []
                 for row in cursor.fetchall():
@@ -218,15 +325,16 @@ class PersistentStorageManager:
     def list_conversations(self) -> List[Dict]:
         """List all stored conversations."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 
                 cursor.execute("""
                     SELECT thread_id, created_at, updated_at, title, message_count, last_message
                     FROM conversation_metadata
+                    WHERE owner_id = ?
                     ORDER BY updated_at DESC
-                """)
+                """, (self.owner_id,))
                 
                 return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
@@ -237,20 +345,16 @@ class PersistentStorageManager:
                                    message_count: int = None, last_message: str = None):
         """Update conversation metadata."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn:
                 cursor = conn.cursor()
                 
-                # Insert or update conversation metadata
-                cursor.execute("""
-                    INSERT OR REPLACE INTO conversation_metadata 
-                    (thread_id, created_at, updated_at, title, message_count, last_message)
-                    VALUES (?, 
-                            COALESCE((SELECT created_at FROM conversation_metadata WHERE thread_id = ?), CURRENT_TIMESTAMP),
-                            CURRENT_TIMESTAMP, 
-                            COALESCE(?, (SELECT title FROM conversation_metadata WHERE thread_id = ?)),
-                            COALESCE(?, (SELECT message_count FROM conversation_metadata WHERE thread_id = ?)),
-                            COALESCE(?, (SELECT last_message FROM conversation_metadata WHERE thread_id = ?)))
-                """, (thread_id, thread_id, title, thread_id, message_count, thread_id, last_message, thread_id))
+                self._upsert_conversation_metadata(
+                    cursor,
+                    thread_id=thread_id,
+                    title=title,
+                    message_count=message_count,
+                    last_message=last_message,
+                )
                 
                 conn.commit()
         except Exception as e:
@@ -259,14 +363,20 @@ class PersistentStorageManager:
     def delete_conversation(self, thread_id: str):
         """Delete a conversation and its metadata."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn:
                 cursor = conn.cursor()
                 
                 # Delete messages first
-                cursor.execute("DELETE FROM conversation_messages WHERE thread_id = ?", (thread_id,))
+                cursor.execute(
+                    "DELETE FROM conversation_messages WHERE owner_id = ? AND thread_id = ?",
+                    (self.owner_id, thread_id),
+                )
                 
                 # Delete metadata
-                cursor.execute("DELETE FROM conversation_metadata WHERE thread_id = ?", (thread_id,))
+                cursor.execute(
+                    "DELETE FROM conversation_metadata WHERE owner_id = ? AND thread_id = ?",
+                    (self.owner_id, thread_id),
+                )
                 
                 conn.commit()
                 return True
@@ -279,10 +389,15 @@ class PersistentStorageManager:
         try:
             # Get metadata
             metadata = None
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
-                cursor.execute("SELECT * FROM conversation_metadata WHERE thread_id = ?", (thread_id,))
+                cursor.execute(
+                    """SELECT thread_id, created_at, updated_at, title, message_count, last_message
+                       FROM conversation_metadata
+                       WHERE owner_id = ? AND thread_id = ?""",
+                    (self.owner_id, thread_id),
+                )
                 row = cursor.fetchone()
                 if row:
                     metadata = dict(row)
@@ -304,15 +419,21 @@ class PersistentStorageManager:
     def get_database_stats(self) -> Dict:
         """Get database statistics."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn:
                 cursor = conn.cursor()
                 
                 # Get conversation count
-                cursor.execute("SELECT COUNT(*) FROM conversation_metadata")
+                cursor.execute(
+                    "SELECT COUNT(*) FROM conversation_metadata WHERE owner_id = ?",
+                    (self.owner_id,),
+                )
                 conversation_count = cursor.fetchone()[0]
                 
                 # Get total messages
-                cursor.execute("SELECT SUM(message_count) FROM conversation_metadata")
+                cursor.execute(
+                    "SELECT SUM(message_count) FROM conversation_metadata WHERE owner_id = ?",
+                    (self.owner_id,),
+                )
                 total_messages = cursor.fetchone()[0] or 0
                 
                 # Get database file size
@@ -327,4 +448,4 @@ class PersistentStorageManager:
                 }
         except Exception as e:
             st.error(f"Error getting database stats: {str(e)}")
-            return {} 
+            return {}

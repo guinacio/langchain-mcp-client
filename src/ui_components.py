@@ -18,7 +18,8 @@ from .llm_providers import (
     requires_api_key, create_llm_model, supports_streaming
 )
 from .mcp_client import (
-    create_single_server_config, create_multi_server_config, MCPConnectionManager
+    create_single_server_config, create_multi_server_config, MCPConnectionManager,
+    ensure_valid_server_url,
 )
 from .agent_manager import create_agent_with_tools
 from .utils import run_async, reset_connection_state, format_error_message, model_supports_tools, create_download_data
@@ -28,6 +29,7 @@ from .llm_providers import is_openai_reasoning_model, supports_streaming_for_rea
 async def test_ollama_connection(base_url: str = "http://localhost:11434") -> Tuple[bool, List[str]]:
     """Test if Ollama API is accessible and return available models"""
     try:
+        ensure_valid_server_url(base_url)
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 f"{base_url}/api/tags",
@@ -201,6 +203,12 @@ def render_ollama_configuration() -> Dict:
     with col1:
         if st.button("Connect to Ollama", type="primary"):
             with st.spinner("Testing Ollama connection..."):
+                try:
+                    ensure_valid_server_url(ollama_url)
+                except ValueError as exc:
+                    st.error(str(exc), icon=":material/security:")
+                    st.session_state.ollama_connected = False
+                    return {"provider": "Ollama", "api_key": "", "model": "", "ollama_url": ollama_url}
                 success, models = run_async(test_ollama_connection(ollama_url))
                 
                 if success and models:
@@ -436,7 +444,9 @@ def render_memory_configuration() -> Dict:
         # Initialize persistent storage if needed
         if memory_type == "Persistent (Cross-session)":
             if 'persistent_storage' not in st.session_state:
-                st.session_state.persistent_storage = PersistentStorageManager()
+                st.session_state.persistent_storage = PersistentStorageManager(
+                    owner_id=st.session_state.storage_owner_id
+                )
             
             render_persistent_storage_section()
         
@@ -720,6 +730,11 @@ def handle_single_server_connection(llm_config: Dict, memory_config: Dict, serve
     elif not server_url:
         st.error("Please enter a valid MCP Server URL")
         return {"mode": "single", "connected": False}
+    try:
+        ensure_valid_server_url(server_url)
+    except ValueError as exc:
+        st.error(str(exc), icon=":material/security:")
+        return {"mode": "single", "connected": False}
     
     # Create progress container
     progress_container = st.container()
@@ -823,6 +838,13 @@ def handle_multiple_servers_connection(llm_config: Dict, memory_config: Dict) ->
         st.error("Please add at least one server")
         return {"mode": "multiple", "connected": False}
     
+    try:
+        for config in st.session_state.servers.values():
+            ensure_valid_server_url(config.get("url", ""))
+    except ValueError as exc:
+        st.error(str(exc), icon=":material/security:")
+        return {"mode": "multiple", "connected": False}
+
     with st.spinner("Connecting to MCP servers..."):
         try:
             # Initialize the MCP connection manager with all servers
@@ -1015,6 +1037,11 @@ def handle_add_server(server_name: str, server_url: str):
     elif server_name in st.session_state.servers:
         st.error(f"Server '{server_name}' already exists")
     else:
+        try:
+            ensure_valid_server_url(server_url)
+        except ValueError as exc:
+            st.error(str(exc), icon=":material/security:")
+            return
         st.session_state.servers[server_name] = {
             "transport": "sse",
             "url": server_url,
@@ -1214,4 +1241,4 @@ def render_tool_parameters(tool):
             param_desc.append(f"[default: {param_default}]")
 
         # Display parameter info
-        st.code(" ".join(param_desc), wrap_lines=True) 
+        st.code(" ".join(param_desc), wrap_lines=True)

@@ -6,6 +6,9 @@ and other shared functionality.
 """
 
 import asyncio
+import hashlib
+import os
+import secrets
 import json
 import datetime
 import logging
@@ -167,6 +170,18 @@ def _run_with_timeout_and_new_loop(coro, timeout: float = 600.0):
 def initialize_session_state():
     """Initialize session state variables with improved async handling."""
     # Initialize basic session state
+    if 'storage_owner_id' not in st.session_state:
+        # A configured key preserves storage across restarts for a trusted
+        # single-user deployment. Otherwise use an unguessable per-session ID
+        # so anonymous browser sessions never share persisted conversations.
+        configured_key = os.environ.get("MCP_CLIENT_STORAGE_KEY", "").strip()
+        if configured_key:
+            st.session_state.storage_owner_id = hashlib.sha256(
+                configured_key.encode("utf-8")
+            ).hexdigest()
+        else:
+            st.session_state.storage_owner_id = secrets.token_urlsafe(32)
+
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
     
@@ -672,4 +687,3 @@ def coerce_content_to_text(content: Any) -> str:
     # Fallback to string conversion
     return str(content) if content is not None else ""
 
- 

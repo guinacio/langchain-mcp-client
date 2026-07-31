@@ -40,6 +40,17 @@ def _streaming_model_cache_key() -> str:
     return f"{provider}::{model}"
 
 
+def _get_scoped_thread_id() -> str:
+    """Namespace persistent LangGraph checkpoints by the server-issued owner."""
+    thread_id = st.session_state.get('thread_id', 'default')
+    if (
+        st.session_state.get('memory_type') == "Persistent (Cross-session)"
+        and hasattr(st.session_state, 'persistent_storage')
+    ):
+        return st.session_state.persistent_storage.scoped_thread_id(thread_id)
+    return thread_id
+
+
 def _normalize_reasoning_tags(text: str) -> str:
     """
     Normalize various reasoning tag variants to <think>...</think> so a single parser works.
@@ -542,7 +553,7 @@ def process_streaming_response(user_input: str, message_content: Any):
     # Prepare agent invocation config
     config = prepare_agent_invocation_config(
         memory_enabled=st.session_state.get('memory_enabled', False),
-        thread_id=st.session_state.get('thread_id', 'default')
+        thread_id=_get_scoped_thread_id()
     )
     
     # Initialize tracking variables
@@ -805,7 +816,7 @@ def process_non_streaming_response(user_input: str, message_content: Any):
         # Prepare agent invocation config
         config = prepare_agent_invocation_config(
             memory_enabled=st.session_state.get('memory_enabled', False),
-            thread_id=st.session_state.get('thread_id', 'default')
+            thread_id=_get_scoped_thread_id()
         )
         
         # Update main status
@@ -1682,7 +1693,9 @@ def render_memory_limits_and_storage():
         memory_type = st.session_state.get('memory_type', 'Short-term (Session)')
         if memory_type == "Persistent (Cross-session)":
             if 'persistent_storage' not in st.session_state:
-                st.session_state.persistent_storage = PersistentStorageManager()
+                st.session_state.persistent_storage = PersistentStorageManager(
+                    owner_id=st.session_state.storage_owner_id
+                )
             
             db_stats = st.session_state.persistent_storage.get_database_stats()
             st.caption(":material/analytics: Database statistics")

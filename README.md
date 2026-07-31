@@ -200,6 +200,34 @@ uv run streamlit run app.py
 
 The application will be available at http://localhost:8501
 
+## Security and deployment
+
+This application is local-first and does not include multi-user authentication.
+The bundled Docker Compose configuration therefore publishes Streamlit and the
+example MCP server on `127.0.0.1` only. Do not change that binding to `0.0.0.0`
+or expose the app through a tunnel/public ingress unless you add authentication
+at a trusted reverse proxy.
+
+Persistent conversations are isolated by a server-issued per-session namespace.
+Pre-upgrade, globally-scoped conversation rows are quarantined during migration
+and are not exposed to new sessions.
+For a trusted single-user deployment that needs storage across browser restarts,
+set a strong `MCP_CLIENT_STORAGE_KEY`; every user of that deployment will share
+that namespace, so do not use this mode for multi-user hosting.
+
+Outbound MCP and Ollama URLs are validated server-side. Loopback URLs remain
+enabled for local development; link-local/cloud-metadata and reserved addresses
+are always blocked. Access to trusted RFC1918/private-network servers requires
+the deployment operator to set `MCP_ALLOW_PRIVATE_URLS=true` (already set in the
+local-only Docker Compose service).
+
+Example local environment configuration:
+
+```env
+MCP_CLIENT_STORAGE_KEY="generate-a-long-random-value"
+MCP_ALLOW_PRIVATE_URLS=true  # only when trusted LAN MCP/Ollama hosts are needed
+```
+
 ### Alternative: Install with pip and requirements.txt
 
 ```bash
