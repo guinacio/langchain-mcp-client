@@ -182,6 +182,12 @@ def initialize_session_state():
         else:
             st.session_state.storage_owner_id = secrets.token_urlsafe(32)
 
+    if 'thread_id' not in st.session_state:
+        # Random default instead of a shared literal "default", so sessions
+        # sharing a storage namespace (MCP_CLIENT_STORAGE_KEY) don't silently
+        # write into the same conversation thread.
+        st.session_state.thread_id = f"conv-{secrets.token_hex(4)}"
+
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
     
